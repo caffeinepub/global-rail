@@ -1,0 +1,150 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { NewOrderData, RoundInfoArgs } from "../backend.d";
+import { useActor } from "./useActor";
+
+export function useProducts() {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["products"],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getAllProducts();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useRoundInfo() {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["roundInfo"],
+    queryFn: async () => {
+      if (!actor) return null;
+      return actor.getCurrentRoundInfo();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useIsAdmin() {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["isAdmin"],
+    queryFn: async () => {
+      if (!actor) return false;
+      return actor.isCallerAdmin();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useUserRole() {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["userRole"],
+    queryFn: async () => {
+      if (!actor) return null;
+      try {
+        return await actor.getCallerUserRole();
+      } catch {
+        // User not yet registered — trap from backend
+        return null;
+      }
+    },
+    enabled: !!actor && !isFetching,
+    retry: false,
+  });
+}
+
+export function useInitializeUser() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (passcode: string) => {
+      if (!actor) throw new Error("Not connected");
+      return actor._initializeAccessControlWithSecret(passcode);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["userRole"] });
+      qc.invalidateQueries({ queryKey: ["isAdmin"] });
+    },
+  });
+}
+
+export function useAllOrders() {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["allOrders"],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getAllOrders();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function usePlaceOrder() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (orderData: NewOrderData) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.placeOrder(orderData);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["allOrders"] });
+    },
+  });
+}
+
+export function useAddProduct() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      name,
+      retailPrice,
+      origin,
+      category,
+    }: {
+      name: string;
+      retailPrice: number;
+      origin: string;
+      category: string;
+    }) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.addProduct(name, retailPrice, origin, category);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+}
+
+export function useRemoveProduct() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (productId: number) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.removeProduct(productId);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+}
+
+export function useSetRoundInfo() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (roundInfo: RoundInfoArgs) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.setCurrentRoundInfo(roundInfo);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["roundInfo"] });
+    },
+  });
+}
