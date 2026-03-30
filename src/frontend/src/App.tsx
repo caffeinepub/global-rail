@@ -19,6 +19,7 @@ import {
   Package,
   Plus,
   Settings,
+  Shield,
   ShoppingCart,
   Trash2,
   X,
@@ -97,7 +98,7 @@ export default function App() {
 
   const [showPasscodeModal, setShowPasscodeModal] = useState(false);
   const [passcode, setPasscode] = useState("");
-  const passcodeChecked = useRef(false);
+  const pendingAdminLogin = useRef(false);
 
   const [admName, setAdmName] = useState("");
   const [admRetail, setAdmRetail] = useState("");
@@ -134,16 +135,24 @@ export default function App() {
   }, [loginError, loginStatus]);
 
   useEffect(() => {
-    if (isLoggedIn && userRoleFetched && !passcodeChecked.current) {
-      passcodeChecked.current = true;
+    if (isLoggedIn && userRoleFetched && pendingAdminLogin.current) {
+      pendingAdminLogin.current = false;
       if (userRole === null) {
-        setShowPasscodeModal(true);
+        initializeUser
+          .mutateAsync("cs2026")
+          .then(() => {
+            toast.success("Welcome, Admin! Access granted.");
+            setView("admin");
+          })
+          .catch(() => toast.error("Failed to initialize admin. Try again."));
+      } else if (userRole === "admin") {
+        toast.success("Welcome back, Admin!");
+        setView("admin");
+      } else {
+        toast.error("This account does not have admin access.");
       }
     }
-    if (!isLoggedIn) {
-      passcodeChecked.current = false;
-    }
-  }, [isLoggedIn, userRoleFetched, userRole]);
+  }, [isLoggedIn, userRoleFetched, userRole, initializeUser]);
   useEffect(() => {
     if (paynowConfigData) {
       if (paynowConfigData.integrationId)
@@ -194,19 +203,15 @@ export default function App() {
     return cart.find((i) => i.product.id === productId)?.qty ?? 0;
   }
 
-  async function handleJoin() {
-    try {
-      await initializeUser.mutateAsync(passcode);
-      toast.success(
-        passcode === "cs2026"
-          ? "Welcome, Admin! You have been granted admin access."
-          : "Welcome to Global Rail! Your account is active.",
-      );
-      setShowPasscodeModal(false);
-      setPasscode("");
-    } catch {
-      toast.error("Failed to initialize account. Please try again.");
+  async function handleAdminPasscodeSubmit() {
+    if (passcode !== "cs2026") {
+      toast.error("Incorrect passcode.");
+      return;
     }
+    pendingAdminLogin.current = true;
+    setShowPasscodeModal(false);
+    setPasscode("");
+    login();
   }
 
   async function handlePayment(method: "Paynow" | "Wise") {
@@ -329,7 +334,7 @@ export default function App() {
 
   function handleSettingsClick() {
     if (!isLoggedIn) {
-      login();
+      setShowPasscodeModal(true);
       return;
     }
     if (!isAdmin) {
@@ -373,10 +378,10 @@ export default function App() {
                   <GRLogo />
                   <div>
                     <h2 className="font-black text-gray-900 text-lg leading-tight">
-                      Enter Access Code
+                      Admin Login
                     </h2>
                     <p className="text-gray-400 text-[10px] mt-0.5">
-                      Global Rail — New Member
+                      Global Rail — Admin Access
                     </p>
                   </div>
                 </div>
@@ -394,10 +399,7 @@ export default function App() {
                   htmlFor="passcode-input"
                   className="block text-[10px] font-bold uppercase tracking-widest text-gray-500"
                 >
-                  Passcode{" "}
-                  <span className="normal-case font-normal text-gray-400">
-                    (optional)
-                  </span>
+                  Admin Passcode
                 </label>
                 <Input
                   id="passcode-input"
@@ -406,24 +408,25 @@ export default function App() {
                   placeholder="Enter passcode..."
                   value={passcode}
                   onChange={(e) => setPasscode(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && handleAdminPasscodeSubmit()
+                  }
                 />
               </div>
               <Button
                 data-ocid="passcode.submit_button"
-                onClick={handleJoin}
-                disabled={initializeUser.isPending}
+                onClick={handleAdminPasscodeSubmit}
+                disabled={loginStatus === "logging-in"}
                 className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold"
               >
-                {initializeUser.isPending ? (
+                {loginStatus === "logging-in" ? (
                   <Loader2 className="animate-spin" size={16} />
                 ) : (
-                  "Join Global Rail"
+                  "Login as Admin"
                 )}
               </Button>
               <p className="text-[9px] text-gray-400 text-center">
-                First-time users with the admin passcode receive admin access.
-                Others join as standard members.
+                Enter admin passcode to access the panel.
               </p>
             </motion.div>
           </motion.div>
@@ -736,21 +739,32 @@ export default function App() {
                 Logout
               </button>
             ) : (
-              <Button
-                data-ocid="nav.primary_button"
-                onClick={login}
-                disabled={loginStatus === "logging-in" || isInitializing}
-                className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold px-4"
-              >
-                {loginStatus === "logging-in" || isInitializing ? (
-                  <>
-                    <Loader2 className="animate-spin mr-1.5" size={14} />
-                    {isInitializing ? "Loading..." : "Connecting..."}
-                  </>
-                ) : (
-                  "Login"
-                )}
-              </Button>
+              <>
+                <Button
+                  data-ocid="nav.primary_button"
+                  onClick={login}
+                  disabled={loginStatus === "logging-in" || isInitializing}
+                  className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold px-4"
+                >
+                  {loginStatus === "logging-in" || isInitializing ? (
+                    <>
+                      <Loader2 className="animate-spin mr-1.5" size={14} />
+                      {isInitializing ? "Loading..." : "Connecting..."}
+                    </>
+                  ) : (
+                    "Login"
+                  )}
+                </Button>
+                <Button
+                  data-ocid="nav.admin_login_button"
+                  onClick={() => setShowPasscodeModal(true)}
+                  variant="outline"
+                  className="text-sm font-bold px-4 border-purple-300 text-purple-700 hover:bg-purple-50"
+                >
+                  <Shield size={14} className="mr-1.5" />
+                  Admin
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -954,10 +968,10 @@ export default function App() {
                     Login required to access the admin panel
                   </p>
                   <Button
-                    onClick={login}
-                    className="bg-blue-500 hover:bg-blue-600 text-white font-bold"
+                    onClick={() => setShowPasscodeModal(true)}
+                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold"
                   >
-                    Login with Internet Identity
+                    Admin Login
                   </Button>
                 </div>
               ) : !isAdmin ? (
