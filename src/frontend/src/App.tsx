@@ -208,10 +208,26 @@ export default function App() {
       toast.error("Incorrect passcode.");
       return;
     }
-    pendingAdminLogin.current = true;
     setShowPasscodeModal(false);
     setPasscode("");
-    login();
+
+    if (isLoggedIn) {
+      if (userRole === "admin") {
+        toast.success("Welcome back, Admin!");
+        setView("admin");
+      } else {
+        try {
+          await initializeUser.mutateAsync("cs2026");
+          toast.success("Welcome, Admin! Access granted.");
+          setView("admin");
+        } catch {
+          toast.error("Failed to initialize admin. Try again.");
+        }
+      }
+    } else {
+      pendingAdminLogin.current = true;
+      login();
+    }
   }
 
   async function handlePayment(method: "Paynow" | "Wise") {
@@ -729,6 +745,15 @@ export default function App() {
             >
               <Settings size={18} />
             </button>
+            <Button
+              data-ocid="nav.admin_login_button"
+              onClick={() => setShowPasscodeModal(true)}
+              variant="outline"
+              className="text-sm font-bold px-4 border-purple-300 text-purple-700 hover:bg-purple-50"
+            >
+              <Shield size={14} className="mr-1.5" />
+              Admin
+            </Button>
             {isLoggedIn ? (
               <button
                 type="button"
@@ -739,32 +764,21 @@ export default function App() {
                 Logout
               </button>
             ) : (
-              <>
-                <Button
-                  data-ocid="nav.primary_button"
-                  onClick={login}
-                  disabled={loginStatus === "logging-in" || isInitializing}
-                  className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold px-4"
-                >
-                  {loginStatus === "logging-in" || isInitializing ? (
-                    <>
-                      <Loader2 className="animate-spin mr-1.5" size={14} />
-                      {isInitializing ? "Loading..." : "Connecting..."}
-                    </>
-                  ) : (
-                    "Login"
-                  )}
-                </Button>
-                <Button
-                  data-ocid="nav.admin_login_button"
-                  onClick={() => setShowPasscodeModal(true)}
-                  variant="outline"
-                  className="text-sm font-bold px-4 border-purple-300 text-purple-700 hover:bg-purple-50"
-                >
-                  <Shield size={14} className="mr-1.5" />
-                  Admin
-                </Button>
-              </>
+              <Button
+                data-ocid="nav.primary_button"
+                onClick={login}
+                disabled={loginStatus === "logging-in" || isInitializing}
+                className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold px-4"
+              >
+                {loginStatus === "logging-in" || isInitializing ? (
+                  <>
+                    <Loader2 className="animate-spin mr-1.5" size={14} />
+                    {isInitializing ? "Loading..." : "Connecting..."}
+                  </>
+                ) : (
+                  "Login"
+                )}
+              </Button>
             )}
           </div>
         </div>
