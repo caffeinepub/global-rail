@@ -10,6 +10,8 @@ import {
 } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
 import {
+  Eye,
+  EyeOff,
   Loader2,
   Mail,
   MapPin,
@@ -30,18 +32,23 @@ import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import {
   useAddProduct,
   useAllOrders,
+  useConfirmOrderReceived,
+  useGetPaynowConfig,
   useInitializeUser,
   useIsAdmin,
+  useMyOrders,
   usePlaceOrder,
   useProducts,
   useRemoveProduct,
   useRoundInfo,
+  useSetPaynowConfig,
   useSetRoundInfo,
+  useUpdateOrderStatus,
   useUserRole,
 } from "./hooks/useQueries";
 
 type CartItem = { product: Product; qty: number };
-type View = "store" | "admin" | "about" | "privacy";
+type View = "store" | "admin" | "about" | "privacy" | "myorders";
 
 function Tag({
   children,
@@ -98,6 +105,11 @@ export default function App() {
   const [admCat, setAdmCat] = useState("Food");
   const [roundNum, setRoundNum] = useState("");
   const [roundDate, setRoundDate] = useState("");
+  const [paynowIntegrationId, setPaynowIntegrationId] = useState("");
+  const [paynowIntegrationKey, setPaynowIntegrationKey] = useState("");
+  const [paynowReturnUrl, setPaynowReturnUrl] = useState("");
+  const [paynowResultUrl, setPaynowResultUrl] = useState("");
+  const [showPaynowKey, setShowPaynowKey] = useState(false);
 
   const { data: products = [], isLoading: productsLoading } = useProducts();
   const { data: roundInfo } = useRoundInfo();
@@ -109,6 +121,11 @@ export default function App() {
   const removeProduct = useRemoveProduct();
   const setRoundInfo = useSetRoundInfo();
   const initializeUser = useInitializeUser();
+  const savePaynowConfig = useSetPaynowConfig();
+  const { data: paynowConfigData } = useGetPaynowConfig(isAdmin && isLoggedIn);
+  const { data: myOrders = [] } = useMyOrders(isLoggedIn);
+  const confirmOrderReceived = useConfirmOrderReceived();
+  const updateOrderStatus = useUpdateOrderStatus();
 
   useEffect(() => {
     if (loginError && loginStatus === "loginError") {
@@ -127,6 +144,18 @@ export default function App() {
       passcodeChecked.current = false;
     }
   }, [isLoggedIn, userRoleFetched, userRole]);
+  useEffect(() => {
+    if (paynowConfigData) {
+      if (paynowConfigData.integrationId)
+        setPaynowIntegrationId(paynowConfigData.integrationId);
+      if (paynowConfigData.integrationKey)
+        setPaynowIntegrationKey(paynowConfigData.integrationKey);
+      if (paynowConfigData.returnUrl)
+        setPaynowReturnUrl(paynowConfigData.returnUrl);
+      if (paynowConfigData.resultUrl)
+        setPaynowResultUrl(paynowConfigData.resultUrl);
+    }
+  }, [paynowConfigData]);
 
   const boxTotal = cart.reduce(
     (sum, item) => sum + item.product.retailPrice * 1.3 * item.qty,
@@ -210,10 +239,22 @@ export default function App() {
       if (now > cutoff) {
         toast.success(
           `Round #01 Closed — shifted to Round #02. Gateway: ${method}`,
+          {
+            action: {
+              label: "View Orders",
+              onClick: () => setView("myorders"),
+            },
+          },
         );
       } else {
         toast.success(
-          `Order confirmed for Round #${roundInfo?.roundNumber ?? "01"}! Redirecting to ${method}...`,
+          `Order placed for Round #${roundInfo?.roundNumber ?? "01"}! View in My Orders.`,
+          {
+            action: {
+              label: "View Orders",
+              onClick: () => setView("myorders"),
+            },
+          },
         );
       }
       setCart([]);
@@ -260,8 +301,25 @@ export default function App() {
       toast.error("Failed to update round info.");
     }
   }
+  async function handleSavePaynow() {
+    if (!paynowIntegrationId || !paynowIntegrationKey) {
+      toast.error("Integration ID and Key are required");
+      return;
+    }
+    try {
+      await savePaynowConfig.mutateAsync({
+        integrationId: paynowIntegrationId,
+        integrationKey: paynowIntegrationKey,
+        returnUrl: paynowReturnUrl,
+        resultUrl: paynowResultUrl,
+      });
+      toast.success("Paynow configuration saved successfully");
+    } catch {
+      toast.error("Failed to save Paynow configuration");
+    }
+  }
 
-  const ordersByDestination = allOrders.reduce(
+  const _ordersByDestination = allOrders.reduce(
     (acc: Record<string, number>, order) => {
       acc[order.destination] = (acc[order.destination] ?? 0) + 1;
       return acc;
@@ -635,6 +693,14 @@ export default function App() {
             </button>
           </nav>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-ocid="nav.tab"
+              onClick={() => setView("myorders")}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${view === "myorders" ? "text-blue-600 bg-blue-50" : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"} ${!isLoggedIn ? "hidden" : ""}`}
+            >
+              My Orders
+            </button>
             <button
               type="button"
               data-ocid="nav.toggle"
@@ -1044,30 +1110,76 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {Object.entries(ordersByDestination).map(
-                          ([dest, count]) => (
+                        {allOrders.map((order, idx) => {
+                          const statusKey = (order as any).status
+                            ? Object.keys((order as any).status as object)[0]
+                            : "pendingPayment";
+                          return (
                             <div
-                              key={dest}
-                              className="flex justify-between p-3 bg-gray-50 rounded-xl items-center"
+                              key={Number(order.id)}
+                              data-ocid={`admin.orders.item.${idx + 1}`}
+                              className="p-3 bg-gray-50 rounded-xl"
                             >
-                              <div>
-                                <p className="font-bold text-gray-700 text-sm uppercase">
-                                  {dest} Hub
-                                </p>
-                                <p className="text-gray-400 text-xs">
-                                  {Number(count)} Order
-                                  {Number(count) !== 1 ? "s" : ""} Pending
-                                </p>
+                              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                <div>
+                                  <p className="font-bold text-gray-700 text-sm">
+                                    Order #{Number(order.id)} —{" "}
+                                    {order.destination} Hub
+                                  </p>
+                                  <p className="text-gray-400 text-xs">
+                                    {order.itemIds.length} item
+                                    {order.itemIds.length !== 1 ? "s" : ""} ·{" "}
+                                    {order.university}
+                                  </p>
+                                </div>
                               </div>
-                              <button
-                                type="button"
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-100 text-green-700 hover:bg-green-200 transition"
-                              >
-                                Release WhatsApp List
-                              </button>
+                              <div className="flex items-center gap-2">
+                                <Select
+                                  value={statusKey}
+                                  onValueChange={(val) => {
+                                    const statusMap: Record<string, object> = {
+                                      pendingPayment: { pendingPayment: null },
+                                      paymentConfirmed: {
+                                        paymentConfirmed: null,
+                                      },
+                                      shipped: { shipped: null },
+                                      delivered: { delivered: null },
+                                      receivedByUser: { receivedByUser: null },
+                                    };
+                                    updateOrderStatus.mutate({
+                                      orderId: order.id,
+                                      status: statusMap[val] as any,
+                                    });
+                                  }}
+                                >
+                                  <SelectTrigger
+                                    data-ocid={`admin.orders.select.${idx + 1}`}
+                                    className="h-8 text-xs w-44"
+                                  >
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="pendingPayment">
+                                      Pending Payment
+                                    </SelectItem>
+                                    <SelectItem value="paymentConfirmed">
+                                      Payment Confirmed
+                                    </SelectItem>
+                                    <SelectItem value="shipped">
+                                      Shipped
+                                    </SelectItem>
+                                    <SelectItem value="delivered">
+                                      Delivered
+                                    </SelectItem>
+                                    <SelectItem value="receivedByUser">
+                                      Received by User
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </div>
-                          ),
-                        )}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1108,6 +1220,85 @@ export default function App() {
                         <Loader2 className="animate-spin" size={16} />
                       ) : (
                         "Update Round Info"
+                      )}
+                    </Button>
+                  </div>
+
+                  <div
+                    className="bg-white rounded-2xl border border-gray-100 border-l-4 border-l-orange-400 p-6 space-y-4"
+                    style={{
+                      boxShadow:
+                        "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
+                    }}
+                  >
+                    <div>
+                      <h3 className="font-extrabold text-gray-900 border-l-4 border-orange-400 pl-3">
+                        Paynow Integration
+                      </h3>
+                      <p className="text-sm text-gray-500 mt-1 pl-3">
+                        Configure your Paynow Zimbabwe merchant credentials.
+                        These are stored securely on-chain.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input
+                        data-ocid="admin.paynow.input"
+                        type="text"
+                        placeholder="Integration ID"
+                        value={paynowIntegrationId}
+                        onChange={(e) => setPaynowIntegrationId(e.target.value)}
+                        className="col-span-2 md:col-span-1"
+                      />
+                      <div className="relative col-span-2 md:col-span-1">
+                        <Input
+                          data-ocid="admin.paynow.input"
+                          type={showPaynowKey ? "text" : "password"}
+                          placeholder="Integration Key"
+                          value={paynowIntegrationKey}
+                          onChange={(e) =>
+                            setPaynowIntegrationKey(e.target.value)
+                          }
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPaynowKey((v) => !v)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                        >
+                          {showPaynowKey ? (
+                            <EyeOff size={16} />
+                          ) : (
+                            <Eye size={16} />
+                          )}
+                        </button>
+                      </div>
+                      <Input
+                        data-ocid="admin.paynow.input"
+                        type="text"
+                        placeholder="https://yourdomain.com/return"
+                        value={paynowReturnUrl}
+                        onChange={(e) => setPaynowReturnUrl(e.target.value)}
+                        className="col-span-2 md:col-span-1"
+                      />
+                      <Input
+                        data-ocid="admin.paynow.input"
+                        type="text"
+                        placeholder="https://yourdomain.com/result"
+                        value={paynowResultUrl}
+                        onChange={(e) => setPaynowResultUrl(e.target.value)}
+                        className="col-span-2 md:col-span-1"
+                      />
+                    </div>
+                    <Button
+                      data-ocid="admin.paynow.save_button"
+                      onClick={handleSavePaynow}
+                      disabled={savePaynowConfig.isPending}
+                      className="w-full bg-green-500 hover:bg-green-600 text-white font-bold"
+                    >
+                      {savePaynowConfig.isPending ? (
+                        <Loader2 className="animate-spin" size={16} />
+                      ) : (
+                        "Save Paynow Config"
                       )}
                     </Button>
                   </div>
@@ -1469,6 +1660,192 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+              </div>
+            </motion.div>
+          )}
+
+          {view === "myorders" && (
+            <motion.div
+              key="myorders"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div className="bg-white border-b border-gray-100">
+                <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+                  <h1 className="text-2xl font-black text-gray-900 mb-1">
+                    My Orders
+                  </h1>
+                  <p className="text-gray-500 text-sm">
+                    Track and confirm your batch orders.
+                  </p>
+                </div>
+              </div>
+              <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+                {!isLoggedIn ? (
+                  <div
+                    data-ocid="myorders.empty_state"
+                    className="text-center py-16 bg-blue-50 rounded-2xl border border-blue-100"
+                  >
+                    <Package size={40} className="mx-auto text-blue-300 mb-3" />
+                    <p className="font-bold text-gray-700 mb-1">
+                      You are not logged in
+                    </p>
+                    <p className="text-gray-400 text-sm mb-4">
+                      Please login to view your orders.
+                    </p>
+                    <Button
+                      onClick={login}
+                      className="bg-blue-500 hover:bg-blue-600 text-white font-bold"
+                    >
+                      Login to View Orders
+                    </Button>
+                  </div>
+                ) : myOrders.length === 0 ? (
+                  <div
+                    data-ocid="myorders.empty_state"
+                    className="text-center py-16 bg-gray-50 rounded-2xl border border-gray-100"
+                  >
+                    <Package size={40} className="mx-auto text-gray-300 mb-3" />
+                    <p className="font-bold text-gray-700 mb-1">
+                      No orders yet
+                    </p>
+                    <p className="text-gray-400 text-sm mb-4">
+                      Your orders will appear here once you place them.
+                    </p>
+                    <Button
+                      onClick={() => setView("store")}
+                      className="bg-blue-500 hover:bg-blue-600 text-white font-bold"
+                    >
+                      Start Shopping
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {myOrders.map((order, idx) => {
+                      const statusKey = (order as any).status
+                        ? Object.keys((order as any).status as object)[0]
+                        : "pendingPayment";
+                      const statusLabels: Record<
+                        string,
+                        { label: string; cls: string }
+                      > = {
+                        pendingPayment: {
+                          label: "Pending Payment",
+                          cls: "bg-yellow-100 text-yellow-700 border-yellow-200",
+                        },
+                        paymentConfirmed: {
+                          label: "Payment Confirmed",
+                          cls: "bg-blue-100 text-blue-700 border-blue-200",
+                        },
+                        shipped: {
+                          label: "Shipped",
+                          cls: "bg-purple-100 text-purple-700 border-purple-200",
+                        },
+                        delivered: {
+                          label: "Delivered",
+                          cls: "bg-green-100 text-green-700 border-green-200",
+                        },
+                        receivedByUser: {
+                          label: "Received ✓",
+                          cls: "bg-gray-100 text-gray-600 border-gray-200",
+                        },
+                      };
+                      const statusInfo =
+                        statusLabels[statusKey] ?? statusLabels.pendingPayment;
+                      const datePlaced = new Date(
+                        Number(order.timestamp) / 1_000_000,
+                      );
+                      return (
+                        <div
+                          key={Number(order.id)}
+                          data-ocid={`myorders.item.${idx + 1}`}
+                          className="bg-white rounded-2xl border border-gray-100 p-5"
+                          style={{
+                            boxShadow:
+                              "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
+                          }}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+                            <div>
+                              <p className="font-black text-gray-900 text-base">
+                                Order #{Number(order.id)}
+                              </p>
+                              <p className="text-gray-400 text-xs mt-0.5">
+                                Placed{" "}
+                                {datePlaced.toLocaleDateString("en-GB", {
+                                  day: "numeric",
+                                  month: "short",
+                                  year: "numeric",
+                                })}
+                              </p>
+                            </div>
+                            <span
+                              className={`px-3 py-1 rounded-full text-xs font-bold border ${statusInfo.cls}`}
+                            >
+                              {statusInfo.label}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-4">
+                            <div className="bg-gray-50 rounded-xl p-3">
+                              <p className="text-gray-400 text-xs mb-0.5">
+                                Items
+                              </p>
+                              <p className="font-bold text-gray-800">
+                                {order.itemIds.length}
+                              </p>
+                            </div>
+                            <div className="bg-gray-50 rounded-xl p-3">
+                              <p className="text-gray-400 text-xs mb-0.5">
+                                Destination
+                              </p>
+                              <p className="font-bold text-gray-800">
+                                {order.destination}
+                              </p>
+                            </div>
+                            <div className="bg-gray-50 rounded-xl p-3">
+                              <p className="text-gray-400 text-xs mb-0.5">
+                                University
+                              </p>
+                              <p className="font-bold text-gray-800 truncate">
+                                {order.university}
+                              </p>
+                            </div>
+                            <div className="bg-gray-50 rounded-xl p-3">
+                              <p className="text-gray-400 text-xs mb-0.5">
+                                Payment
+                              </p>
+                              <p className="font-bold text-gray-800">
+                                {order.paymentMethod === "online"
+                                  ? "Wise/GBP"
+                                  : "Paynow"}
+                              </p>
+                            </div>
+                          </div>
+                          {statusKey === "delivered" && (
+                            <Button
+                              data-ocid={`myorders.confirm_button.${idx + 1}`}
+                              onClick={() =>
+                                confirmOrderReceived.mutate(order.id)
+                              }
+                              disabled={confirmOrderReceived.isPending}
+                              className="bg-green-500 hover:bg-green-600 text-white font-bold text-sm"
+                            >
+                              {confirmOrderReceived.isPending ? (
+                                <Loader2
+                                  className="animate-spin mr-2"
+                                  size={14}
+                                />
+                              ) : null}
+                              Confirm Receipt
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </motion.div>
           )}

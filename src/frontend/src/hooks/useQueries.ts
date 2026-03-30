@@ -2,6 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NewOrderData, RoundInfoArgs } from "../backend.d";
 import { useActor } from "./useActor";
 
+export type OrderStatus =
+  | { pendingPayment: null }
+  | { paymentConfirmed: null }
+  | { shipped: null }
+  | { delivered: null }
+  | { receivedByUser: null };
+
 export function useProducts() {
   const { actor, isFetching } = useActor();
   return useQuery({
@@ -83,6 +90,18 @@ export function useAllOrders() {
   });
 }
 
+export function useMyOrders(enabled: boolean) {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["myOrders"],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getMyOrders();
+    },
+    enabled: !!actor && !isFetching && enabled,
+  });
+}
+
 export function usePlaceOrder() {
   const { actor } = useActor();
   const qc = useQueryClient();
@@ -90,6 +109,41 @@ export function usePlaceOrder() {
     mutationFn: async (orderData: NewOrderData) => {
       if (!actor) throw new Error("Not connected");
       return actor.placeOrder(orderData);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["allOrders"] });
+      qc.invalidateQueries({ queryKey: ["myOrders"] });
+    },
+  });
+}
+
+export function useConfirmOrderReceived() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (orderId: bigint) => {
+      if (!actor) throw new Error("Not connected");
+      return (actor as any).confirmOrderReceived(orderId);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["myOrders"] });
+    },
+  });
+}
+
+export function useUpdateOrderStatus() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      orderId,
+      status,
+    }: {
+      orderId: bigint;
+      status: OrderStatus;
+    }) => {
+      if (!actor) throw new Error("Not connected");
+      return (actor as any).updateOrderStatus(orderId, status);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["allOrders"] });
@@ -145,6 +199,37 @@ export function useSetRoundInfo() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["roundInfo"] });
+    },
+  });
+}
+
+export function useGetPaynowConfig(enabled: boolean) {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["paynowConfig"],
+    queryFn: async () => {
+      if (!actor) return null;
+      return (actor as any).getPaynowConfig();
+    },
+    enabled: !!actor && !isFetching && enabled,
+  });
+}
+
+export function useSetPaynowConfig() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (config: {
+      integrationId: string;
+      integrationKey: string;
+      returnUrl: string;
+      resultUrl: string;
+    }) => {
+      if (!actor) throw new Error("Not connected");
+      return (actor as any).setPaynowConfig(config);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["paynowConfig"] });
     },
   });
 }

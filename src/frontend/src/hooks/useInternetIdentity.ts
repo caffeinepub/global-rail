@@ -217,6 +217,7 @@ export function InternetIdentityProvider({
       .logout()
       .then(() => {
         setIdentity(undefined);
+        setAuthClient(undefined);
         setStatus("idle");
         setError(undefined);
       })

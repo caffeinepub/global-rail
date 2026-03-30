@@ -17,6 +17,13 @@ export const PaymentMethod = IDL.Variant({
   'cashOnDelivery' : IDL.Null,
   'online' : IDL.Null,
 });
+export const OrderStatus = IDL.Variant({
+  'pendingPayment' : IDL.Null,
+  'paymentConfirmed' : IDL.Null,
+  'shipped' : IDL.Null,
+  'delivered' : IDL.Null,
+  'receivedByUser' : IDL.Null,
+});
 export const OrderData = IDL.Record({
   'id' : IDL.Nat64,
   'destination' : IDL.Text,
@@ -26,6 +33,7 @@ export const OrderData = IDL.Record({
   'timestamp' : IDL.Int,
   'pincode' : IDL.Nat32,
   'itemIds' : IDL.Vec(IDL.Nat32),
+  'status' : OrderStatus,
 });
 export const Product = IDL.Record({
   'id' : IDL.Nat32,
@@ -49,6 +57,12 @@ export const RoundInfoArgs = IDL.Record({
   'closingDate' : IDL.Text,
   'roundNumber' : IDL.Nat32,
 });
+export const PaynowConfig = IDL.Record({
+  'integrationId' : IDL.Text,
+  'integrationKey' : IDL.Text,
+  'returnUrl' : IDL.Text,
+  'resultUrl' : IDL.Text,
+});
 
 export const idlService = IDL.Service({
   '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
@@ -59,7 +73,6 @@ export const idlService = IDL.Service({
     ),
   'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
   'getAllOrders' : IDL.Func([], [IDL.Vec(OrderData)], []),
-  'getAllOrdersByTimestamp' : IDL.Func([], [IDL.Vec(OrderData)], ['query']),
   'getAllProducts' : IDL.Func([], [IDL.Vec(Product)], ['query']),
   'getAllProductsByName' : IDL.Func([], [IDL.Vec(Product)], ['query']),
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
@@ -69,73 +82,10 @@ export const idlService = IDL.Service({
   'placeOrder' : IDL.Func([NewOrderData], [IDL.Nat64], []),
   'removeProduct' : IDL.Func([IDL.Nat32], [], []),
   'setCurrentRoundInfo' : IDL.Func([RoundInfoArgs], [], []),
+  'updateOrderStatus' : IDL.Func([IDL.Nat64, OrderStatus], [], []),
+  'confirmOrderReceived' : IDL.Func([IDL.Nat64], [], []),
+  'setPaynowConfig' : IDL.Func([PaynowConfig], [], []),
+  'getPaynowConfig' : IDL.Func([], [PaynowConfig], []),
 });
 
-export const idlInitArgs = [];
-
-export const idlFactory = ({ IDL }) => {
-  const UserRole = IDL.Variant({
-    'admin' : IDL.Null,
-    'user' : IDL.Null,
-    'guest' : IDL.Null,
-  });
-  const PaymentMethod = IDL.Variant({
-    'cashOnDelivery' : IDL.Null,
-    'online' : IDL.Null,
-  });
-  const OrderData = IDL.Record({
-    'id' : IDL.Nat64,
-    'destination' : IDL.Text,
-    'paymentMethod' : PaymentMethod,
-    'user' : IDL.Principal,
-    'university' : IDL.Text,
-    'timestamp' : IDL.Int,
-    'pincode' : IDL.Nat32,
-    'itemIds' : IDL.Vec(IDL.Nat32),
-  });
-  const Product = IDL.Record({
-    'id' : IDL.Nat32,
-    'retailPrice' : IDL.Nat32,
-    'name' : IDL.Text,
-    'origin' : IDL.Text,
-    'category' : IDL.Text,
-  });
-  const RoundInfo = IDL.Record({
-    'closingDate' : IDL.Text,
-    'roundNumber' : IDL.Nat32,
-  });
-  const NewOrderData = IDL.Record({
-    'destination' : IDL.Text,
-    'paymentMethod' : PaymentMethod,
-    'university' : IDL.Text,
-    'pincode' : IDL.Nat32,
-    'itemIds' : IDL.Vec(IDL.Nat32),
-  });
-  const RoundInfoArgs = IDL.Record({
-    'closingDate' : IDL.Text,
-    'roundNumber' : IDL.Nat32,
-  });
-  
-  return IDL.Service({
-    '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
-    'addProduct' : IDL.Func(
-        [IDL.Text, IDL.Nat32, IDL.Text, IDL.Text],
-        [IDL.Nat32],
-        [],
-      ),
-    'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
-    'getAllOrders' : IDL.Func([], [IDL.Vec(OrderData)], []),
-    'getAllOrdersByTimestamp' : IDL.Func([], [IDL.Vec(OrderData)], ['query']),
-    'getAllProducts' : IDL.Func([], [IDL.Vec(Product)], ['query']),
-    'getAllProductsByName' : IDL.Func([], [IDL.Vec(Product)], ['query']),
-    'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
-    'getCurrentRoundInfo' : IDL.Func([], [RoundInfo], ['query']),
-    'getMyOrders' : IDL.Func([], [IDL.Vec(OrderData)], ['query']),
-    'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
-    'placeOrder' : IDL.Func([NewOrderData], [IDL.Nat64], []),
-    'removeProduct' : IDL.Func([IDL.Nat32], [], []),
-    'setCurrentRoundInfo' : IDL.Func([RoundInfoArgs], [], []),
-  });
-};
-
-export const init = ({ IDL }) => { return []; };
+export const idlFactory = idlService;

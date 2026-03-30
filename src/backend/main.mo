@@ -37,6 +37,15 @@ actor {
     #online;
   };
 
+  type OrderStatus = {
+    #pendingPayment;
+    #paymentConfirmed;
+    #shipped;
+    #delivered;
+    #receivedByUser;
+  };
+
+  // Stored order (no status field — preserved for backward compat)
   type OrderData = {
     id : Nat64;
     user : Principal;
@@ -48,13 +57,22 @@ actor {
     timestamp : Int;
   };
 
-  module OrderData {
-    public func compare(order1 : OrderData, order2 : OrderData) : Order.Order {
-      Nat64.compare(order1.id, order2.id);
-    };
+  // Returned to callers — includes status
+  type OrderDataWithStatus = {
+    id : Nat64;
+    user : Principal;
+    itemIds : [Nat32];
+    destination : Text;
+    university : Text;
+    pincode : Nat32;
+    paymentMethod : PaymentMethod;
+    timestamp : Int;
+    status : OrderStatus;
+  };
 
-    public func compareByTimestamp(order1 : OrderData, order2 : OrderData) : Order.Order {
-      Int.compare(order1.timestamp, order2.timestamp);
+  module OrderData {
+    public func compareByTimestampDesc(order1 : OrderData, order2 : OrderData) : Order.Order {
+      Int.compare(order2.timestamp, order1.timestamp);
     };
   };
 
@@ -71,6 +89,13 @@ actor {
     paymentMethod : PaymentMethod;
   };
 
+  type PaynowConfig = {
+    integrationId : Text;
+    integrationKey : Text;
+    returnUrl : Text;
+    resultUrl : Text;
+  };
+
   // Authorization state
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
@@ -82,9 +107,38 @@ actor {
     closingDate = "";
     roundNumber = 0;
   };
+  var paynowConfig : PaynowConfig = {
+    integrationId = "";
+    integrationKey = "";
+    returnUrl = "";
+    resultUrl = "";
+  };
 
   let productStore = Map.empty<Nat32, Product>();
   let orderStore = Map.empty<Nat64, OrderData>();
+  // Separate store for order statuses — allows backward-compat migration
+  let orderStatusStore = Map.empty<Nat64, OrderStatus>();
+
+  func getOrderStatus(orderId : Nat64) : OrderStatus {
+    switch (orderStatusStore.get(orderId)) {
+      case (?s) { s };
+      case null { #pendingPayment };
+    };
+  };
+
+  func withStatus(order : OrderData) : OrderDataWithStatus {
+    {
+      id = order.id;
+      user = order.user;
+      itemIds = order.itemIds;
+      destination = order.destination;
+      university = order.university;
+      pincode = order.pincode;
+      paymentMethod = order.paymentMethod;
+      timestamp = order.timestamp;
+      status = getOrderStatus(order.id);
+    };
+  };
 
   // Product management (Admin only)
   public shared ({ caller }) func addProduct(name : Text, retailPrice : Nat32, origin : Text, category : Text) : async Nat32 {
@@ -142,30 +196,53 @@ actor {
       timestamp = Time.now();
     };
     orderStore.add(orderIdCounter, newOrder);
+    orderStatusStore.add(orderIdCounter, #pendingPayment);
     orderIdCounter;
   };
 
-  public query ({ caller }) func getMyOrders() : async [OrderData] {
+  public query ({ caller }) func getMyOrders() : async [OrderDataWithStatus] {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can view orders");
     };
-    orderStore.values().toArray().filter(
-      func(order) { order.user == caller }
-    );
+    orderStore.values().toArray()
+      .filter(func(order) { order.user == caller })
+      .sort(OrderData.compareByTimestampDesc)
+      .map(withStatus);
   };
 
-  public shared ({ caller }) func getAllOrders() : async [OrderData] {
+  public shared ({ caller }) func getAllOrders() : async [OrderDataWithStatus] {
     if (not AccessControl.isAdmin(accessControlState, caller)) {
       Runtime.trap("Unauthorized: Admin access required");
     };
-    orderStore.values().toArray().sort();
+    orderStore.values().toArray()
+      .sort(OrderData.compareByTimestampDesc)
+      .map(withStatus);
   };
 
-  public query ({ caller }) func getAllOrdersByTimestamp() : async [OrderData] {
+  public shared ({ caller }) func updateOrderStatus(orderId : Nat64, status : OrderStatus) : async () {
     if (not AccessControl.isAdmin(accessControlState, caller)) {
       Runtime.trap("Unauthorized: Admin access required");
     };
-    orderStore.values().toArray().sort(OrderData.compareByTimestamp);
+    if (not orderStore.containsKey(orderId)) {
+      Runtime.trap("Order not found");
+    };
+    orderStatusStore.add(orderId, status);
+  };
+
+  public shared ({ caller }) func confirmOrderReceived(orderId : Nat64) : async () {
+    switch (orderStore.get(orderId)) {
+      case null { Runtime.trap("Order not found") };
+      case (?order) {
+        if (order.user != caller) {
+          Runtime.trap("Unauthorized: Not your order");
+        };
+        switch (getOrderStatus(orderId)) {
+          case (#delivered) {};
+          case _ { Runtime.trap("Order must be in delivered status to confirm receipt") };
+        };
+        orderStatusStore.add(orderId, #receivedByUser);
+      };
+    };
   };
 
   // Round info management
@@ -183,5 +260,20 @@ actor {
       Runtime.trap("Unauthorized: Admin access required");
     };
     currentRoundInfo := roundInfo;
+  };
+
+  // Paynow config management (Admin only)
+  public shared ({ caller }) func setPaynowConfig(config : PaynowConfig) : async () {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Admin access required");
+    };
+    paynowConfig := config;
+  };
+
+  public shared ({ caller }) func getPaynowConfig() : async PaynowConfig {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Admin access required");
+    };
+    paynowConfig;
   };
 };
