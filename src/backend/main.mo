@@ -10,8 +10,11 @@ import Nat64 "mo:core/Nat64";
 import Int "mo:core/Int";
 import Order "mo:core/Order";
 
+
 import AccessControl "authorization/access-control";
 import MixinAuthorization "authorization/MixinAuthorization";
+
+// Apply migration on upgrade, switch from persistent actor to normal actor
 
 actor {
   type Product = {
@@ -45,7 +48,6 @@ actor {
     #receivedByUser;
   };
 
-  // Stored order (no status field — preserved for backward compat)
   type OrderData = {
     id : Nat64;
     user : Principal;
@@ -57,7 +59,6 @@ actor {
     timestamp : Int;
   };
 
-  // Returned to callers — includes status
   type OrderDataWithStatus = {
     id : Nat64;
     user : Principal;
@@ -96,9 +97,19 @@ actor {
     resultUrl : Text;
   };
 
-  // Authorization state
+  // User profile type for frontend requirements
+  public type UserProfile = {
+    name : Text;
+    email : Text;
+    phone : Text;
+  };
+
+  // Authorization state (kept for user-level operations)
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
+
+  // Admin password stored on-chain
+  var adminPassword : Text = "cs2026";
 
   // Persistent state
   var productIdCounter : Nat32 = 0;
@@ -116,8 +127,8 @@ actor {
 
   let productStore = Map.empty<Nat32, Product>();
   let orderStore = Map.empty<Nat64, OrderData>();
-  // Separate store for order statuses — allows backward-compat migration
   let orderStatusStore = Map.empty<Nat64, OrderStatus>();
+  let userProfiles = Map.empty<Principal, UserProfile>();
 
   func getOrderStatus(orderId : Nat64) : OrderStatus {
     switch (orderStatusStore.get(orderId)) {
@@ -140,10 +151,49 @@ actor {
     };
   };
 
-  // Product management (Admin only)
-  public shared ({ caller }) func addProduct(name : Text, retailPrice : Nat32, origin : Text, category : Text) : async Nat32 {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Admin access required");
+  // User Profile Management
+  public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can view profiles");
+    };
+    userProfiles.get(caller);
+  };
+
+  public query ({ caller }) func getUserProfile(user : Principal) : async ?UserProfile {
+    if (caller != user and not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Can only view your own profile");
+    };
+    userProfiles.get(user);
+  };
+
+  public shared ({ caller }) func saveCallerUserProfile(profile : UserProfile) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can save profiles");
+    };
+    userProfiles.add(caller, profile);
+  };
+
+  // Admin password check
+  public query func checkAdminPassword(password : Text) : async Bool {
+    password == adminPassword;
+  };
+
+  // Change admin password
+  public shared func changeAdminPassword(oldPassword : Text, newPassword : Text) : async Bool {
+    if (oldPassword != adminPassword) {
+      return false;
+    };
+    if (newPassword.size() < 4) {
+      return false;
+    };
+    adminPassword := newPassword;
+    true;
+  };
+
+  // Product management (Admin only via password)
+  public shared func addProduct(adminKey : Text, name : Text, retailPrice : Nat32, origin : Text, category : Text) : async Nat32 {
+    if (adminKey != adminPassword) {
+      Runtime.trap("Unauthorized: Invalid admin password");
     };
     productIdCounter += 1;
     let newProduct : Product = {
@@ -157,9 +207,9 @@ actor {
     productIdCounter;
   };
 
-  public shared ({ caller }) func removeProduct(productId : Nat32) : async () {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Admin access required");
+  public shared func removeProduct(adminKey : Text, productId : Nat32) : async () {
+    if (adminKey != adminPassword) {
+      Runtime.trap("Unauthorized: Invalid admin password");
     };
     if (not productStore.containsKey(productId)) {
       Runtime.trap("Product not found");
@@ -210,18 +260,18 @@ actor {
       .map(withStatus);
   };
 
-  public shared ({ caller }) func getAllOrders() : async [OrderDataWithStatus] {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Admin access required");
+  public shared func getAllOrders(adminKey : Text) : async [OrderDataWithStatus] {
+    if (adminKey != adminPassword) {
+      Runtime.trap("Unauthorized: Invalid admin password");
     };
     orderStore.values().toArray()
       .sort(OrderData.compareByTimestampDesc)
       .map(withStatus);
   };
 
-  public shared ({ caller }) func updateOrderStatus(orderId : Nat64, status : OrderStatus) : async () {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Admin access required");
+  public shared func updateOrderStatus(adminKey : Text, orderId : Nat64, status : OrderStatus) : async () {
+    if (adminKey != adminPassword) {
+      Runtime.trap("Unauthorized: Invalid admin password");
     };
     if (not orderStore.containsKey(orderId)) {
       Runtime.trap("Order not found");
@@ -245,7 +295,6 @@ actor {
     };
   };
 
-  // Round info management
   public type RoundInfoArgs = {
     closingDate : Text;
     roundNumber : Nat32;
@@ -255,24 +304,23 @@ actor {
     currentRoundInfo;
   };
 
-  public shared ({ caller }) func setCurrentRoundInfo(roundInfo : RoundInfoArgs) : async () {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Admin access required");
+  public shared func setCurrentRoundInfo(adminKey : Text, roundInfo : RoundInfoArgs) : async () {
+    if (adminKey != adminPassword) {
+      Runtime.trap("Unauthorized: Invalid admin password");
     };
     currentRoundInfo := roundInfo;
   };
 
-  // Paynow config management (Admin only)
-  public shared ({ caller }) func setPaynowConfig(config : PaynowConfig) : async () {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Admin access required");
+  public shared func setPaynowConfig(adminKey : Text, config : PaynowConfig) : async () {
+    if (adminKey != adminPassword) {
+      Runtime.trap("Unauthorized: Invalid admin password");
     };
     paynowConfig := config;
   };
 
-  public shared ({ caller }) func getPaynowConfig() : async PaynowConfig {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Admin access required");
+  public shared func getPaynowConfig(adminKey : Text) : async PaynowConfig {
+    if (adminKey != adminPassword) {
+      Runtime.trap("Unauthorized: Invalid admin password");
     };
     paynowConfig;
   };

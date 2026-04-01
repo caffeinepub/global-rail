@@ -1,6 +1,14 @@
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -8,12 +16,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Toaster } from "@/components/ui/sonner";
+import { Separator } from "@/components/ui/separator";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Toaster } from "@/components/ui/sonner";
+import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  CheckCircle,
+  Clock,
   Eye,
   EyeOff,
-  Loader2,
-  Mail,
+  Lock,
+  LogIn,
+  LogOut,
   MapPin,
   Minus,
   Package,
@@ -21,159 +49,162 @@ import {
   Settings,
   Shield,
   ShoppingCart,
+  Train,
   Trash2,
+  Truck,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { PaymentMethod } from "./backend";
-import type { Product } from "./backend.d";
+import { PaymentMethod, type Product } from "./backend.d";
 import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import {
+  OrderStatus,
   useAddProduct,
-  useAllOrders,
+  useChangeAdminPassword,
+  useCheckAdminPassword,
   useConfirmOrderReceived,
+  useGetAllOrders,
+  useGetAllProducts,
+  useGetCurrentRoundInfo,
+  useGetMyOrders,
   useGetPaynowConfig,
-  useInitializeUser,
-  useIsAdmin,
-  useMyOrders,
   usePlaceOrder,
-  useProducts,
   useRemoveProduct,
-  useRoundInfo,
+  useSetCurrentRoundInfo,
   useSetPaynowConfig,
-  useSetRoundInfo,
   useUpdateOrderStatus,
-  useUserRole,
 } from "./hooks/useQueries";
 
-type CartItem = { product: Product; qty: number };
 type View = "store" | "admin" | "about" | "privacy" | "myorders";
 
-function Tag({
-  children,
-  className,
-  style,
-}: {
-  children: React.ReactNode;
-  className: string;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <span className={`tag ${className}`} style={style}>
-      {children}
-    </span>
-  );
+interface CartItem {
+  product: Product;
+  qty: number;
 }
 
-function GRLogo() {
-  return (
-    <div
-      className="w-9 h-9 rounded-lg flex items-center justify-center font-black text-white text-sm shadow-md"
-      style={{ background: "#3b82f6" }}
-    >
-      GR
-    </div>
-  );
+const DESTINATIONS = ["India", "United Kingdom", "Poland", "UAE"];
+
+const STATUS_LABELS: Record<OrderStatus, string> = {
+  [OrderStatus.pendingPayment]: "Pending Payment",
+  [OrderStatus.paymentConfirmed]: "Payment Confirmed",
+  [OrderStatus.shipped]: "Shipped",
+  [OrderStatus.delivered]: "Delivered",
+  [OrderStatus.receivedByUser]: "Received ✓",
+};
+
+const STATUS_COLORS: Record<OrderStatus, string> = {
+  [OrderStatus.pendingPayment]: "bg-yellow-100 text-yellow-800",
+  [OrderStatus.paymentConfirmed]: "bg-blue-100 text-blue-800",
+  [OrderStatus.shipped]: "bg-purple-100 text-purple-800",
+  [OrderStatus.delivered]: "bg-green-100 text-green-800",
+  [OrderStatus.receivedByUser]: "bg-gray-100 text-gray-700",
+};
+
+function formatPrice(n: number) {
+  return `$${(n * 1.3).toFixed(2)}`;
 }
 
 export default function App() {
-  const { login, clear, identity, loginStatus, isInitializing, loginError } =
+  const { login, clear, identity, loginStatus, isInitializing } =
     useInternetIdentity();
   const isLoggedIn = !!identity;
 
   const [view, setView] = useState<View>("store");
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    try {
+      const saved = localStorage.getItem("gr_empire_box");
+      return saved ? (JSON.parse(saved) as CartItem[]) : [];
+    } catch {
+      return [];
+    }
+  });
   const [cartOpen, setCartOpen] = useState(false);
+  const [adminKey, setAdminKey] = useState("");
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [adminPassInput, setAdminPassInput] = useState("");
   const [destination, setDestination] = useState("");
   const [university, setUniversity] = useState("");
   const [pincode, setPincode] = useState("");
-  const [freightOptimizer, setFreightOptimizer] = useState(true);
-  const [privacyAccepted, setPrivacyAccepted] = useState(() =>
-    typeof window !== "undefined"
-      ? !!localStorage.getItem("gr_privacy_accepted")
-      : true,
-  );
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [showPrivacyBanner, setShowPrivacyBanner] = useState(false);
+  const [freightOptimizer, setFreightOptimizer] = useState(false);
 
-  const [showPasscodeModal, setShowPasscodeModal] = useState(false);
-  const [passcode, setPasscode] = useState("");
-  const pendingAdminLogin = useRef(false);
+  // Admin forms
+  const [newProductName, setNewProductName] = useState("");
+  const [newProductPrice, setNewProductPrice] = useState("");
+  const [newProductOrigin, setNewProductOrigin] = useState("");
+  const [newProductCategory, setNewProductCategory] = useState("");
 
-  const [admName, setAdmName] = useState("");
-  const [admRetail, setAdmRetail] = useState("");
-  const [admOrigin, setAdmOrigin] = useState("Zimbabwe");
-  const [admCat, setAdmCat] = useState("Food");
-  const [roundNum, setRoundNum] = useState("");
+  const [roundNumber, setRoundNumber] = useState("");
   const [roundDate, setRoundDate] = useState("");
-  const [paynowIntegrationId, setPaynowIntegrationId] = useState("");
-  const [paynowIntegrationKey, setPaynowIntegrationKey] = useState("");
-  const [paynowReturnUrl, setPaynowReturnUrl] = useState("");
-  const [paynowResultUrl, setPaynowResultUrl] = useState("");
+
+  const [paynowIntId, setPaynowIntId] = useState("");
+  const [paynowKey, setPaynowKey] = useState("");
+  const [paynowReturn, setPaynowReturn] = useState("");
+  const [paynowResult, setPaynowResult] = useState("");
   const [showPaynowKey, setShowPaynowKey] = useState(false);
 
-  const { data: products = [], isLoading: productsLoading } = useProducts();
-  const { data: roundInfo } = useRoundInfo();
-  const { data: isAdmin = false } = useIsAdmin();
-  const { data: allOrders = [] } = useAllOrders();
-  const { data: userRole, isFetched: userRoleFetched } = useUserRole();
-  const placeOrder = usePlaceOrder();
+  const [oldPass, setOldPass] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+
+  // Queries
+  const { data: products, isLoading: loadingProducts } = useGetAllProducts();
+  const { data: roundInfo } = useGetCurrentRoundInfo();
+  const { data: myOrders, isLoading: loadingMyOrders } =
+    useGetMyOrders(isLoggedIn);
+  const { data: allOrders } = useGetAllOrders(adminKey);
+  const { data: paynowConfig } = useGetPaynowConfig(adminKey);
+
+  // Mutations
+  const checkPass = useCheckAdminPassword();
+  const changePass = useChangeAdminPassword();
   const addProduct = useAddProduct();
   const removeProduct = useRemoveProduct();
-  const setRoundInfo = useSetRoundInfo();
-  const initializeUser = useInitializeUser();
-  const savePaynowConfig = useSetPaynowConfig();
-  const { data: paynowConfigData } = useGetPaynowConfig(isAdmin && isLoggedIn);
-  const { data: myOrders = [] } = useMyOrders(isLoggedIn);
-  const confirmOrderReceived = useConfirmOrderReceived();
-  const updateOrderStatus = useUpdateOrderStatus();
+  const updateStatus = useUpdateOrderStatus();
+  const confirmReceived = useConfirmOrderReceived();
+  const placeOrder = usePlaceOrder();
+  const setPaynow = useSetPaynowConfig();
+  const setRound = useSetCurrentRoundInfo();
 
   useEffect(() => {
-    if (loginError && loginStatus === "loginError") {
-      toast.error("Login failed. Please try again.");
-    }
-  }, [loginError, loginStatus]);
+    const accepted = localStorage.getItem("gr_privacy_accepted");
+    if (!accepted) setShowPrivacyBanner(true);
+  }, []);
 
+  // Persist Empire Box (cart) to localStorage
   useEffect(() => {
-    if (isLoggedIn && userRoleFetched && pendingAdminLogin.current) {
-      pendingAdminLogin.current = false;
-      if (userRole === null) {
-        initializeUser
-          .mutateAsync("cs2026")
-          .then(() => {
-            toast.success("Welcome, Admin! Access granted.");
-            setView("admin");
-          })
-          .catch(() => toast.error("Failed to initialize admin. Try again."));
-      } else if (userRole === "admin") {
-        toast.success("Welcome back, Admin!");
-        setView("admin");
-      } else {
-        toast.error("This account does not have admin access.");
-      }
-    }
-  }, [isLoggedIn, userRoleFetched, userRole, initializeUser]);
-  useEffect(() => {
-    if (paynowConfigData) {
-      if (paynowConfigData.integrationId)
-        setPaynowIntegrationId(paynowConfigData.integrationId);
-      if (paynowConfigData.integrationKey)
-        setPaynowIntegrationKey(paynowConfigData.integrationKey);
-      if (paynowConfigData.returnUrl)
-        setPaynowReturnUrl(paynowConfigData.returnUrl);
-      if (paynowConfigData.resultUrl)
-        setPaynowResultUrl(paynowConfigData.resultUrl);
-    }
-  }, [paynowConfigData]);
+    try {
+      localStorage.setItem("gr_empire_box", JSON.stringify(cart));
+    } catch {}
+  }, [cart]);
 
-  const boxTotal = cart.reduce(
-    (sum, item) => sum + item.product.retailPrice * 1.3 * item.qty,
+  // Pre-fill paynow fields when config loads
+  useEffect(() => {
+    if (paynowConfig) {
+      setPaynowIntId(paynowConfig.integrationId);
+      setPaynowKey(paynowConfig.integrationKey);
+      setPaynowReturn(paynowConfig.returnUrl);
+      setPaynowResult(paynowConfig.resultUrl);
+    }
+  }, [paynowConfig]);
+
+  // Pre-fill round fields
+  useEffect(() => {
+    if (roundInfo) {
+      setRoundNumber(String(roundInfo.roundNumber));
+      setRoundDate(roundInfo.closingDate);
+    }
+  }, [roundInfo]);
+
+  const cartTotal = cart.reduce(
+    (s, i) => s + i.product.retailPrice * 1.3 * i.qty,
     0,
   );
-  const minReached = boxTotal >= 50;
-  const cartCount = cart.reduce((s, i) => s + i.qty, 0);
 
-  function addToCart(product: Product) {
+  const addToCart = useCallback((product: Product) => {
     setCart((prev) => {
       const existing = prev.find((i) => i.product.id === product.id);
       if (existing)
@@ -182,1837 +213,1474 @@ export default function App() {
         );
       return [...prev, { product, qty: 1 }];
     });
-  }
+  }, []);
 
-  function removeFromCart(productId: number) {
-    setCart((prev) => {
-      const item = prev.find((i) => i.product.id === productId);
-      if (!item) return prev;
-      if (item.qty <= 1) return prev.filter((i) => i.product.id !== productId);
-      return prev.map((i) =>
-        i.product.id === productId ? { ...i, qty: i.qty - 1 } : i,
-      );
-    });
-  }
+  const updateQty = useCallback((productId: number, delta: number) => {
+    setCart((prev) =>
+      prev
+        .map((i) =>
+          i.product.id === productId ? { ...i, qty: i.qty + delta } : i,
+        )
+        .filter((i) => i.qty > 0),
+    );
+  }, []);
 
-  function deleteFromCart(productId: number) {
-    setCart((prev) => prev.filter((i) => i.product.id !== productId));
-  }
-
-  function cartQty(productId: number) {
-    return cart.find((i) => i.product.id === productId)?.qty ?? 0;
-  }
-
-  async function handleAdminPasscodeSubmit() {
-    if (passcode !== "cs2026") {
-      toast.error("Incorrect passcode.");
-      return;
-    }
-    setShowPasscodeModal(false);
-    setPasscode("");
-
-    if (isLoggedIn) {
-      if (userRole === "admin") {
-        toast.success("Welcome back, Admin!");
+  const handleAdminLogin = async () => {
+    if (!adminPassInput.trim()) return;
+    try {
+      const ok = await checkPass.mutateAsync(adminPassInput.trim());
+      if (ok) {
+        setAdminKey(adminPassInput.trim());
+        setAdminModalOpen(false);
+        setAdminPassInput("");
         setView("admin");
+        toast.success("Admin access granted");
       } else {
-        try {
-          await initializeUser.mutateAsync("cs2026");
-          toast.success("Welcome, Admin! Access granted.");
-          setView("admin");
-        } catch {
-          toast.error("Failed to initialize admin. Try again.");
-        }
+        toast.error("Incorrect password");
       }
-    } else {
-      pendingAdminLogin.current = true;
-      login();
+    } catch {
+      toast.error("Failed to verify password — please try again");
     }
-  }
+  };
 
-  async function handlePayment(method: "Paynow" | "Wise") {
+  const handleLogoutAdmin = () => {
+    setAdminKey("");
+    setView("store");
+    toast.success("Logged out of admin");
+  };
+
+  const handleCheckout = async (method: PaymentMethod) => {
     if (!isLoggedIn) {
-      toast.error("Please login to place an order.");
+      toast.error("Please log in to place an order");
       return;
     }
-    if (!destination || !university || !pincode) {
-      toast.error("Please select your destination, university, and pincode.");
+    if (!destination) {
+      toast.error("Select a destination");
       return;
     }
-    const now = new Date();
-    const cutoff = roundInfo ? new Date(roundInfo.closingDate) : new Date();
+    if (!university) {
+      toast.error("Enter university/hostel name");
+      return;
+    }
+    if (!pincode) {
+      toast.error("Enter pincode");
+      return;
+    }
+    if (!privacyAccepted) {
+      toast.error("Please accept the privacy policy");
+      return;
+    }
+    if (cartTotal < 50) {
+      toast.error("Minimum order is $50");
+      return;
+    }
+
     const itemIds = new Uint32Array(
-      cart.flatMap((item) =>
-        Array.from({ length: item.qty }, () => item.product.id),
-      ),
+      cart.flatMap((i) => Array(i.qty).fill(i.product.id)),
     );
     try {
       await placeOrder.mutateAsync({
         destination,
-        paymentMethod:
-          method === "Paynow"
-            ? PaymentMethod.cashOnDelivery
-            : PaymentMethod.online,
+        paymentMethod: method,
         university,
-        pincode: Number.parseInt(pincode, 10),
+        pincode: Number(pincode),
         itemIds,
       });
-      if (now > cutoff) {
-        toast.success(
-          `Round #01 Closed — shifted to Round #02. Gateway: ${method}`,
-          {
-            action: {
-              label: "View Orders",
-              onClick: () => setView("myorders"),
-            },
-          },
-        );
-      } else {
-        toast.success(
-          `Order placed for Round #${roundInfo?.roundNumber ?? "01"}! View in My Orders.`,
-          {
-            action: {
-              label: "View Orders",
-              onClick: () => setView("myorders"),
-            },
-          },
-        );
-      }
       setCart([]);
+      localStorage.removeItem("gr_empire_box");
       setCartOpen(false);
+      toast.success("Order placed!", {
+        action: { label: "View Orders", onClick: () => setView("myorders") },
+      });
     } catch {
-      toast.error("Failed to place order. Please try again.");
+      toast.error("Failed to place order");
     }
-  }
+  };
 
-  async function handleAdminAddProduct() {
-    if (!admName || !admRetail) {
-      toast.error("Please fill in product name and price");
+  const handleChangePassword = async () => {
+    if (newPass !== confirmPass) {
+      toast.error("Passwords don't match");
+      return;
+    }
+    if (!newPass) {
+      toast.error("Enter a new password");
       return;
     }
     try {
-      await addProduct.mutateAsync({
-        name: admName,
-        retailPrice: Number.parseFloat(admRetail),
-        origin: admOrigin,
-        category: admCat,
+      const ok = await changePass.mutateAsync({
+        oldPassword: oldPass,
+        newPassword: newPass,
       });
-      toast.success(
-        `${admName} added at landed price: $${(Number.parseFloat(admRetail) * 1.3).toFixed(2)}`,
-      );
-      setAdmName("");
-      setAdmRetail("");
+      if (ok) {
+        setAdminKey(newPass);
+        setOldPass("");
+        setNewPass("");
+        setConfirmPass("");
+        toast.success("Password changed");
+      } else {
+        toast.error("Old password incorrect");
+      }
     } catch {
-      toast.error("Failed to add product.");
+      toast.error("Failed to change password");
     }
-  }
+  };
 
-  async function handleSetRound() {
-    if (!roundNum || !roundDate) {
-      toast.error("Please fill in round number and closing date");
-      return;
-    }
+  const handleSavePaynow = async () => {
     try {
-      await setRoundInfo.mutateAsync({
-        roundNumber: Number.parseInt(roundNum, 10),
-        closingDate: roundDate,
+      await setPaynow.mutateAsync({
+        adminKey,
+        config: {
+          integrationId: paynowIntId,
+          integrationKey: paynowKey,
+          returnUrl: paynowReturn,
+          resultUrl: paynowResult,
+        },
       });
-      toast.success("Round info updated!");
+      toast.success("Paynow config saved");
     } catch {
-      toast.error("Failed to update round info.");
+      toast.error("Failed to save config");
     }
-  }
-  async function handleSavePaynow() {
-    if (!paynowIntegrationId || !paynowIntegrationKey) {
-      toast.error("Integration ID and Key are required");
-      return;
-    }
+  };
+
+  const handleSaveRound = async () => {
     try {
-      await savePaynowConfig.mutateAsync({
-        integrationId: paynowIntegrationId,
-        integrationKey: paynowIntegrationKey,
-        returnUrl: paynowReturnUrl,
-        resultUrl: paynowResultUrl,
+      await setRound.mutateAsync({
+        adminKey,
+        roundInfo: { roundNumber: Number(roundNumber), closingDate: roundDate },
       });
-      toast.success("Paynow configuration saved successfully");
+      toast.success("Round info updated");
     } catch {
-      toast.error("Failed to save Paynow configuration");
+      toast.error("Failed to update round");
     }
-  }
+  };
 
-  const _ordersByDestination = allOrders.reduce(
-    (acc: Record<string, number>, order) => {
-      acc[order.destination] = (acc[order.destination] ?? 0) + 1;
-      return acc;
-    },
-    {},
-  );
-
-  function handleSettingsClick() {
-    if (!isLoggedIn) {
-      setShowPasscodeModal(true);
-      return;
-    }
-    if (!isAdmin) {
-      toast.error("Access Denied — Admin role required");
-      return;
-    }
-    setView(view === "admin" ? "store" : "admin");
-  }
-
-  function acceptPrivacy() {
-    localStorage.setItem("gr_privacy_accepted", "1");
-    setPrivacyAccepted(true);
-  }
+  const totalItems = cart.reduce((s, i) => s + i.qty, 0);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <Toaster />
+    <div className="min-h-screen bg-background flex flex-col">
+      <Toaster richColors />
 
-      {/* PASSCODE MODAL */}
-      <AnimatePresence>
-        {showPasscodeModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            data-ocid="passcode.modal"
-            className="fixed inset-0 z-[100] flex items-center justify-center px-4"
-            style={{
-              background: "rgba(0,0,0,0.5)",
-              backdropFilter: "blur(4px)",
-            }}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="w-full max-w-sm bg-white rounded-2xl p-7 shadow-2xl space-y-5"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <GRLogo />
-                  <div>
-                    <h2 className="font-black text-gray-900 text-lg leading-tight">
-                      Admin Login
-                    </h2>
-                    <p className="text-gray-400 text-[10px] mt-0.5">
-                      Global Rail — Admin Access
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  data-ocid="passcode.close_button"
-                  onClick={() => setShowPasscodeModal(false)}
-                  className="text-gray-400 hover:text-gray-700 transition p-1"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="space-y-2">
-                <label
-                  htmlFor="passcode-input"
-                  className="block text-[10px] font-bold uppercase tracking-widest text-gray-500"
-                >
-                  Admin Passcode
-                </label>
-                <Input
-                  id="passcode-input"
-                  data-ocid="passcode.input"
-                  type="password"
-                  placeholder="Enter passcode..."
-                  value={passcode}
-                  onChange={(e) => setPasscode(e.target.value)}
-                  onKeyDown={(e) =>
-                    e.key === "Enter" && handleAdminPasscodeSubmit()
-                  }
-                />
-              </div>
-              <Button
-                data-ocid="passcode.submit_button"
-                onClick={handleAdminPasscodeSubmit}
-                disabled={loginStatus === "logging-in"}
-                className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold"
-              >
-                {loginStatus === "logging-in" ? (
-                  <Loader2 className="animate-spin" size={16} />
-                ) : (
-                  "Login as Admin"
-                )}
-              </Button>
-              <p className="text-[9px] text-gray-400 text-center">
-                Enter admin passcode to access the panel.
-              </p>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* CART DRAWER */}
-      <AnimatePresence>
-        {cartOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[80] flex"
-            style={{ background: "rgba(0,0,0,0.3)" }}
-            onClick={() => setCartOpen(false)}
-          >
-            <motion.div
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="ml-auto w-full max-w-sm bg-white h-full shadow-2xl flex flex-col"
-              onClick={(e) => e.stopPropagation()}
-              data-ocid="checkout.panel"
-            >
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h2 className="font-black text-gray-900 text-lg flex items-center gap-2">
-                  <ShoppingCart size={18} className="text-blue-500" />
-                  Empire Box
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setCartOpen(false)}
-                  className="text-gray-400 hover:text-gray-700 transition"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-                {cart.length === 0 ? (
-                  <div
-                    data-ocid="checkout.empty_state"
-                    className="text-center py-12"
-                  >
-                    <ShoppingCart
-                      size={36}
-                      className="mx-auto mb-3 text-gray-300"
-                    />
-                    <p className="text-gray-400 font-semibold text-sm">
-                      Your box is empty
-                    </p>
-                    <p className="text-gray-300 text-xs mt-1">
-                      Add products to get started
-                    </p>
-                  </div>
-                ) : (
-                  cart.map((item) => (
-                    <div
-                      key={item.product.id}
-                      className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-gray-900 text-sm truncate">
-                          {item.product.name}
-                        </p>
-                        <p className="text-gray-400 text-xs">
-                          ${(item.product.retailPrice * 1.3).toFixed(2)} each
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => removeFromCart(item.product.id)}
-                          className="w-6 h-6 rounded-md bg-gray-200 hover:bg-gray-300 flex items-center justify-center transition"
-                        >
-                          <Minus size={10} />
-                        </button>
-                        <span className="w-6 text-center font-black text-sm">
-                          {item.qty}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => addToCart(item.product)}
-                          className="w-6 h-6 rounded-md bg-blue-500 hover:bg-blue-600 flex items-center justify-center transition"
-                        >
-                          <Plus size={10} className="text-white" />
-                        </button>
-                      </div>
-                      <p className="font-black text-gray-900 text-sm">
-                        $
-                        {(item.product.retailPrice * 1.3 * item.qty).toFixed(2)}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => deleteFromCart(item.product.id)}
-                        className="text-gray-300 hover:text-red-400 transition"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {cart.length > 0 && (
-                <div className="px-5 py-3 border-t border-gray-100 space-y-2">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">
-                    Delivery Details
-                  </p>
-                  <Select value={destination} onValueChange={setDestination}>
-                    <SelectTrigger
-                      data-ocid="hub.select"
-                      className="text-sm h-9 bg-gray-50"
-                    >
-                      <SelectValue placeholder="Destination Country" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="India">
-                        India (KIIT/Delhi Hubs)
-                      </SelectItem>
-                      <SelectItem value="UK">
-                        United Kingdom (London Hub)
-                      </SelectItem>
-                      <SelectItem value="Poland">
-                        Poland (Wroclaw Hub)
-                      </SelectItem>
-                      <SelectItem value="UAE">UAE (Dubai Hub)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    data-ocid="hub.input"
-                    placeholder="University / Hostel Name"
-                    value={university}
-                    onChange={(e) => setUniversity(e.target.value)}
-                    className="text-sm h-9 bg-gray-50"
-                  />
-                  <Input
-                    data-ocid="hub.input"
-                    placeholder="Pincode / Zip Code"
-                    value={pincode}
-                    onChange={(e) => setPincode(e.target.value)}
-                    className="text-sm h-9 bg-gray-50"
-                  />
-                </div>
-              )}
-
-              <div className="px-5 py-4 border-t border-gray-100 space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="font-bold text-gray-600 text-sm">Total</span>
-                  <span
-                    data-ocid="checkout.card"
-                    className="text-2xl font-black text-blue-500"
-                  >
-                    ${boxTotal.toFixed(2)}
-                  </span>
-                </div>
-                <AnimatePresence>
-                  {!minReached && cart.length > 0 && (
-                    <motion.p
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      data-ocid="checkout.error_state"
-                      className="text-[10px] text-red-500 font-bold bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-center"
-                    >
-                      Minimum $50.00 required to unlock batch delivery
-                    </motion.p>
-                  )}
-                </AnimatePresence>
-                <div className="space-y-2">
-                  <Button
-                    data-ocid="checkout.primary_button"
-                    onClick={() => handlePayment("Paynow")}
-                    disabled={!minReached || placeOrder.isPending}
-                    className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold"
-                  >
-                    {placeOrder.isPending ? (
-                      <Loader2 className="animate-spin" size={16} />
-                    ) : (
-                      "Paynow (Zim Parent)"
-                    )}
-                  </Button>
-                  <Button
-                    data-ocid="checkout.secondary_button"
-                    variant="outline"
-                    onClick={() => handlePayment("Wise")}
-                    disabled={!minReached || placeOrder.isPending}
-                    className="w-full font-bold border-gray-200"
-                  >
-                    {placeOrder.isPending ? (
-                      <Loader2 className="animate-spin" size={16} />
-                    ) : (
-                      "Wise / GBP (Student)"
-                    )}
-                  </Button>
-                </div>
-                <div className="flex items-start gap-2 pt-1">
-                  <Checkbox id="privacy-checkout" className="mt-0.5" />
-                  <label
-                    htmlFor="privacy-checkout"
-                    className="text-[10px] text-gray-400 leading-relaxed cursor-pointer"
-                  >
-                    I have read and agree to the{" "}
-                    <button
-                      type="button"
-                      className="underline text-blue-500 hover:text-blue-700"
-                      onClick={() => {
-                        setCartOpen(false);
-                        setView("privacy");
-                      }}
-                    >
-                      Privacy Policy
-                    </button>
-                  </label>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* HEADER */}
-      <header
-        className="sticky top-0 z-50 bg-white border-b border-gray-100"
-        style={{
-          boxShadow: "0 1px 0 rgba(0,0,0,0.06), 0 2px 12px rgba(0,0,0,0.04)",
-        }}
-      >
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      {/* NAVBAR */}
+      <header className="sticky top-0 z-50 bg-card/90 backdrop-blur-md border-b border-border shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
+          {/* Logo */}
           <button
             type="button"
-            data-ocid="nav.link"
             onClick={() => setView("store")}
-            className="flex items-center gap-2.5 cursor-pointer"
+            className="flex items-center gap-2 font-display font-bold text-xl text-primary"
+            data-ocid="nav.link"
           >
-            <GRLogo />
-            <span className="font-black text-xl tracking-tight text-gray-900">
-              GLOBAL <span className="text-blue-500">RAIL</span>
-            </span>
+            <Train className="w-6 h-6" />
+            Global Rail
           </button>
+
+          {/* Nav links */}
           <nav className="hidden md:flex items-center gap-1">
-            <button
-              type="button"
-              data-ocid="nav.tab"
-              onClick={() => setView("store")}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${view === "store" || view === "admin" ? "text-blue-600 bg-blue-50" : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"}`}
-            >
-              Shop
-            </button>
-            <button
-              type="button"
-              data-ocid="nav.tab"
-              onClick={() => setView("about")}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${view === "about" ? "text-blue-600 bg-blue-50" : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"}`}
-            >
-              About Us
-            </button>
-            <button
-              type="button"
-              data-ocid="nav.tab"
-              onClick={() => setView("privacy")}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${view === "privacy" ? "text-blue-600 bg-blue-50" : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"}`}
-            >
-              Privacy
-            </button>
-          </nav>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              data-ocid="nav.tab"
-              onClick={() => setView("myorders")}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${view === "myorders" ? "text-blue-600 bg-blue-50" : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"} ${!isLoggedIn ? "hidden" : ""}`}
-            >
-              My Orders
-            </button>
-            <button
-              type="button"
-              data-ocid="nav.toggle"
-              onClick={() => {
-                setView("store");
-                setCartOpen(true);
-              }}
-              className="relative p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition"
-            >
-              <ShoppingCart size={20} />
-              {cartCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-blue-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">
-                  {cartCount}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              data-ocid="nav.toggle"
-              onClick={handleSettingsClick}
-              className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-50 rounded-lg transition"
-              title="Admin Panel"
-            >
-              <Settings size={18} />
-            </button>
-            <Button
-              data-ocid="nav.admin_login_button"
-              onClick={() => setShowPasscodeModal(true)}
-              variant="outline"
-              className="text-sm font-bold px-4 border-purple-300 text-purple-700 hover:bg-purple-50"
-            >
-              <Shield size={14} className="mr-1.5" />
-              Admin
-            </Button>
-            {isLoggedIn ? (
+            {(["store", "about", "privacy"] as const).map((v) => (
               <button
                 type="button"
-                data-ocid="nav.secondary_button"
-                onClick={clear}
-                className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-500 hover:text-gray-900 border border-gray-200 hover:border-gray-400 transition"
+                key={v}
+                onClick={() => setView(v)}
+                data-ocid={`nav.${v}.link`}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  view === v
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
               >
-                Logout
+                {v === "store"
+                  ? "Shop"
+                  : v === "about"
+                    ? "About Us"
+                    : "Privacy"}
               </button>
+            ))}
+            {isLoggedIn && (
+              <button
+                type="button"
+                onClick={() => setView("myorders")}
+                data-ocid="nav.myorders.link"
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  view === "myorders"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
+              >
+                My Orders
+              </button>
+            )}
+          </nav>
+
+          <div className="flex items-center gap-2">
+            {/* Admin button */}
+            {adminKey ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setView(view === "admin" ? "store" : "admin")}
+                  data-ocid="nav.admin.button"
+                  className="border-accent text-accent hover:bg-accent hover:text-accent-foreground"
+                >
+                  <Shield className="w-4 h-4 mr-1" />
+                  {view === "admin" ? "Shop" : "Admin"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleLogoutAdmin}
+                  data-ocid="nav.admin.logout.button"
+                >
+                  <Lock className="w-4 h-4" />
+                </Button>
+              </>
             ) : (
               <Button
-                data-ocid="nav.primary_button"
-                onClick={login}
-                disabled={loginStatus === "logging-in" || isInitializing}
-                className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold px-4"
+                size="sm"
+                onClick={() => setAdminModalOpen(true)}
+                data-ocid="nav.admin.button"
+                className="bg-accent text-accent-foreground hover:bg-accent/90"
               >
-                {loginStatus === "logging-in" || isInitializing ? (
-                  <>
-                    <Loader2 className="animate-spin mr-1.5" size={14} />
-                    {isInitializing ? "Loading..." : "Connecting..."}
-                  </>
-                ) : (
-                  "Login"
-                )}
+                <Shield className="w-4 h-4 mr-1" />
+                Admin
               </Button>
             )}
+
+            {/* Login/Logout */}
+            {isInitializing ? null : isLoggedIn ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={clear}
+                data-ocid="nav.logout.button"
+              >
+                <LogOut className="w-4 h-4 mr-1" /> Logout
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={login}
+                disabled={loginStatus === "logging-in"}
+                data-ocid="nav.login.button"
+              >
+                <LogIn className="w-4 h-4 mr-1" />
+                {loginStatus === "logging-in" ? "Signing in..." : "Login"}
+              </Button>
+            )}
+
+            {/* Cart */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setCartOpen(true)}
+              className="relative"
+              data-ocid="nav.cart.button"
+            >
+              <ShoppingCart className="w-4 h-4" />
+              {totalItems > 0 && (
+                <Badge className="absolute -top-2 -right-2 h-5 w-5 p-0 flex items-center justify-center text-xs">
+                  {totalItems}
+                </Badge>
+              )}
+            </Button>
           </div>
         </div>
       </header>
 
       {/* ROUND BANNER */}
-      <div className="bg-blue-500 text-white">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-1 text-center sm:text-left">
-          <p className="text-sm font-semibold">
-            🚂 Grocery Round #
-            {String(roundInfo?.roundNumber ?? 1).padStart(2, "0")} — Closes:{" "}
-            <strong>{roundInfo?.closingDate ?? "01 May 2026"}</strong>
-          </p>
-          <p className="text-xs text-blue-200">
-            Minimum order $50 · Late orders shift to next round
-          </p>
+      {roundInfo && (
+        <div className="bg-primary text-primary-foreground text-center py-2 text-sm font-medium">
+          <Clock className="w-4 h-4 inline mr-1" />
+          Grocery Round #{roundInfo.roundNumber} — Closes{" "}
+          {roundInfo.closingDate} &nbsp;·&nbsp; Minimum order $50 · Late orders
+          shift to next round
         </div>
-      </div>
+      )}
 
-      {/* MAIN */}
-      <main className="flex-1">
+      {/* MAIN CONTENT */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-8">
         <AnimatePresence mode="wait">
           {view === "store" && (
             <motion.div
               key="store"
-              initial={{ opacity: 0, y: 8 }}
+              initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ duration: 0.25 }}
             >
-              <div className="bg-white border-b border-gray-100">
-                <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
-                  <div className="max-w-2xl">
-                    <span className="inline-block text-[10px] font-black uppercase tracking-[0.2em] text-blue-500 mb-3">
-                      Zimbabwe × World
-                    </span>
-                    <h1 className="font-display text-3xl sm:text-5xl font-bold text-gray-900 leading-tight mb-4">
-                      Making those away from home{" "}
-                      <em className="text-blue-500 not-italic">feel at home</em>{" "}
-                      — without paying extra
-                    </h1>
-                    <p className="text-gray-500 text-lg leading-relaxed mb-6">
-                      Batch grocery logistics from Zimbabwe to your campus.
-                      Order with friends, split the freight, save on everything.
-                    </p>
-                    <Button
-                      onClick={() =>
-                        document
-                          .getElementById("products")
-                          ?.scrollIntoView({ behavior: "smooth" })
-                      }
-                      className="bg-blue-500 hover:bg-blue-600 text-white font-bold px-6 py-3 text-base"
-                    >
-                      Shop Now
-                    </Button>
-                  </div>
-                </div>
+              {/* Hero */}
+              <div className="text-center mb-12 py-8">
+                <motion.h1
+                  className="font-display text-4xl md:text-5xl font-bold text-foreground mb-4"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 }}
+                >
+                  Making those away from home
+                  <br />
+                  <span className="text-primary">feel at home</span>
+                </motion.h1>
+                <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+                  Without paying extra. International grocery and goods delivery
+                  — batch logistics for students and families.
+                </p>
               </div>
 
-              <div
-                id="products"
-                className="max-w-6xl mx-auto px-4 sm:px-6 py-10"
-              >
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl font-black text-gray-900">
-                    Current Batch Products
-                  </h2>
-                  <span className="text-sm text-gray-400 font-medium">
-                    {products.length} item{products.length !== 1 ? "s" : ""}
-                  </span>
-                </div>
-                {productsLoading ? (
-                  <div
-                    data-ocid="store.loading_state"
-                    className="flex items-center justify-center py-24"
-                  >
-                    <Loader2 className="animate-spin text-blue-500" size={32} />
-                  </div>
-                ) : products.length === 0 ? (
-                  <div
-                    data-ocid="store.empty_state"
-                    className="bg-white rounded-2xl border border-gray-100 p-16 text-center"
-                    style={{
-                      boxShadow:
-                        "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                    }}
-                  >
-                    <Package size={40} className="mx-auto mb-3 text-gray-300" />
-                    <p className="text-gray-500 font-bold text-sm">
-                      No products yet.
-                    </p>
-                    <p className="text-gray-400 text-xs mt-1">
-                      An admin will add products to the batch soon.
-                    </p>
-                  </div>
-                ) : (
-                  <div
-                    data-ocid="store.list"
-                    className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
-                  >
-                    {products.map((product, idx) => {
-                      const landedPrice = product.retailPrice * 1.3;
-                      const qty = cartQty(product.id);
-                      return (
-                        <motion.div
-                          key={product.id}
-                          data-ocid={`store.item.${idx + 1}`}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: idx * 0.04 }}
-                          className="bg-white rounded-2xl p-5 flex flex-col transition-shadow hover:shadow-lg"
-                          style={{
-                            boxShadow:
-                              "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                          }}
-                        >
-                          <div className="flex gap-1.5 mb-3 flex-wrap">
-                            <Tag className="bg-gray-100 text-gray-500">
-                              {product.origin}
-                            </Tag>
-                            <Tag
-                              className="text-blue-600"
-                              style={{ background: "rgba(59,130,246,0.1)" }}
-                            >
-                              {product.category}
-                            </Tag>
-                          </div>
-                          <h3 className="font-extrabold text-gray-900 text-base leading-tight flex-1 mb-2">
-                            {product.name}
-                          </h3>
-                          <p className="text-[9px] font-black uppercase tracking-wider text-gray-400 mb-4">
-                            Zim Retail + 30% Cap
-                          </p>
-                          <div className="flex items-center justify-between mt-auto">
-                            <p className="text-2xl font-black text-gray-900">
-                              ${landedPrice.toFixed(2)}
-                            </p>
-                            {qty === 0 ? (
-                              <Button
-                                data-ocid={`store.secondary_button.${idx + 1}`}
-                                onClick={() => addToCart(product)}
-                                className="bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold px-4 py-2 h-auto"
-                              >
-                                Add to Box
-                              </Button>
-                            ) : (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => removeFromCart(product.id)}
-                                  className="w-7 h-7 rounded-md bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition"
-                                >
-                                  <Minus size={12} />
-                                </button>
-                                <span className="w-8 text-center font-black text-sm">
-                                  {qty}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => addToCart(product)}
-                                  className="w-7 h-7 rounded-md bg-blue-500 hover:bg-blue-600 flex items-center justify-center transition"
-                                >
-                                  <Plus size={12} className="text-white" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-
-          {view === "admin" && (
-            <motion.div
-              key="admin"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-              className="max-w-4xl mx-auto px-4 sm:px-6 py-10 space-y-6"
-            >
-              <div className="flex items-center gap-3 mb-2">
-                <Settings size={22} className="text-gray-400" />
-                <h1 className="text-2xl font-black text-gray-900">
-                  Admin Panel
-                </h1>
-              </div>
-              {!isLoggedIn ? (
+              {/* Products */}
+              {loadingProducts ? (
                 <div
-                  className="bg-white rounded-2xl border border-gray-100 p-12 text-center"
-                  style={{
-                    boxShadow:
-                      "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                  }}
+                  className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
+                  data-ocid="products.loading_state"
                 >
-                  <p className="text-amber-600 font-bold mb-4">
-                    Login required to access the admin panel
-                  </p>
-                  <Button
-                    onClick={() => setShowPasscodeModal(true)}
-                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold"
-                  >
-                    Admin Login
-                  </Button>
+                  {[1, 2, 3, 4, 5, 6].map((i) => (
+                    <Skeleton key={i} className="h-56 rounded-xl" />
+                  ))}
                 </div>
-              ) : !isAdmin ? (
+              ) : !products?.length ? (
                 <div
-                  className="bg-white rounded-2xl border border-red-100 p-12 text-center"
-                  style={{
-                    boxShadow:
-                      "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                  }}
+                  className="text-center py-20 text-muted-foreground"
+                  data-ocid="products.empty_state"
                 >
-                  <p className="text-red-500 font-bold text-lg">
-                    Access Denied
-                  </p>
-                  <p className="text-gray-400 text-sm mt-2">
-                    Admin role required to view this panel.
-                  </p>
+                  <Package className="w-12 h-12 mx-auto mb-3 opacity-40" />
+                  <p className="text-lg">Products loading — check back soon</p>
                 </div>
               ) : (
-                <>
-                  <div
-                    className="bg-white rounded-2xl border border-gray-100 p-6 space-y-4"
-                    style={{
-                      boxShadow:
-                        "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                    }}
-                  >
-                    <h2 className="text-lg font-extrabold text-gray-900 border-l-4 border-amber-400 pl-3">
-                      Product Rail Manager
-                    </h2>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input
-                        data-ocid="admin.input"
-                        type="text"
-                        placeholder="Product Name"
-                        value={admName}
-                        onChange={(e) => setAdmName(e.target.value)}
-                        className="col-span-2 md:col-span-1"
-                      />
-                      <Input
-                        data-ocid="admin.input"
-                        type="number"
-                        placeholder="Zim Retail Price ($)"
-                        value={admRetail}
-                        onChange={(e) => setAdmRetail(e.target.value)}
-                      />
-                      <Select value={admOrigin} onValueChange={setAdmOrigin}>
-                        <SelectTrigger data-ocid="admin.select">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Zimbabwe">
-                            Origin: Zimbabwe
-                          </SelectItem>
-                          <SelectItem value="Nigeria">
-                            Origin: Nigeria
-                          </SelectItem>
-                          <SelectItem value="Nepal">Origin: Nepal</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={admCat} onValueChange={setAdmCat}>
-                        <SelectTrigger data-ocid="admin.select">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Food">Category: Food</SelectItem>
-                          <SelectItem value="Fashion">
-                            Category: Fashion
-                          </SelectItem>
-                          <SelectItem value="Hygiene">
-                            Category: Hygiene
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Button
-                      data-ocid="admin.submit_button"
-                      onClick={handleAdminAddProduct}
-                      disabled={addProduct.isPending}
-                      className="w-full bg-amber-400 hover:bg-amber-500 text-gray-900 font-black"
-                    >
-                      {addProduct.isPending ? (
-                        <Loader2 className="animate-spin" size={16} />
-                      ) : (
-                        "Add to Global Batch"
-                      )}
-                    </Button>
-                  </div>
-
-                  {products.length > 0 && (
-                    <div
-                      className="bg-white rounded-2xl border border-gray-100 p-6"
-                      style={{
-                        boxShadow:
-                          "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                      }}
-                    >
-                      <h3 className="font-bold text-sm text-gray-500 uppercase tracking-widest mb-4">
-                        Current Products ({products.length})
-                      </h3>
-                      <div className="space-y-2">
-                        {products.map((p) => (
-                          <div
-                            key={p.id}
-                            className="flex items-center justify-between p-3 bg-gray-50 rounded-xl"
-                          >
-                            <div>
-                              <p className="text-gray-900 text-sm font-bold">
-                                {p.name}
-                              </p>
-                              <p className="text-gray-400 text-xs">
-                                {p.origin} · {p.category} · $
-                                {(p.retailPrice * 1.3).toFixed(2)} landed
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              data-ocid="admin.delete_button"
-                              onClick={() => removeProduct.mutate(p.id)}
-                              className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div
-                    className="bg-white rounded-2xl border border-gray-100 p-6"
-                    style={{
-                      boxShadow:
-                        "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                    }}
-                  >
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="font-extrabold text-gray-900 border-l-4 border-green-400 pl-3">
-                        Institutional Stock Sync
-                      </h3>
-                      <Tag className="bg-green-100 text-green-700">
-                        Hubs Active
-                      </Tag>
-                    </div>
-                    {allOrders.length === 0 ? (
-                      <div
-                        data-ocid="admin.empty_state"
-                        className="text-center py-6"
-                      >
-                        <p className="text-gray-400 text-sm">No orders yet.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {allOrders.map((order, idx) => {
-                          const statusKey = (order as any).status
-                            ? Object.keys((order as any).status as object)[0]
-                            : "pendingPayment";
-                          return (
-                            <div
-                              key={Number(order.id)}
-                              data-ocid={`admin.orders.item.${idx + 1}`}
-                              className="p-3 bg-gray-50 rounded-xl"
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                                <div>
-                                  <p className="font-bold text-gray-700 text-sm">
-                                    Order #{Number(order.id)} —{" "}
-                                    {order.destination} Hub
-                                  </p>
-                                  <p className="text-gray-400 text-xs">
-                                    {order.itemIds.length} item
-                                    {order.itemIds.length !== 1 ? "s" : ""} ·{" "}
-                                    {order.university}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Select
-                                  value={statusKey}
-                                  onValueChange={(val) => {
-                                    const statusMap: Record<string, object> = {
-                                      pendingPayment: { pendingPayment: null },
-                                      paymentConfirmed: {
-                                        paymentConfirmed: null,
-                                      },
-                                      shipped: { shipped: null },
-                                      delivered: { delivered: null },
-                                      receivedByUser: { receivedByUser: null },
-                                    };
-                                    updateOrderStatus.mutate({
-                                      orderId: order.id,
-                                      status: statusMap[val] as any,
-                                    });
-                                  }}
-                                >
-                                  <SelectTrigger
-                                    data-ocid={`admin.orders.select.${idx + 1}`}
-                                    className="h-8 text-xs w-44"
-                                  >
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="pendingPayment">
-                                      Pending Payment
-                                    </SelectItem>
-                                    <SelectItem value="paymentConfirmed">
-                                      Payment Confirmed
-                                    </SelectItem>
-                                    <SelectItem value="shipped">
-                                      Shipped
-                                    </SelectItem>
-                                    <SelectItem value="delivered">
-                                      Delivered
-                                    </SelectItem>
-                                    <SelectItem value="receivedByUser">
-                                      Received by User
-                                    </SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  <div
-                    className="bg-white rounded-2xl border border-gray-100 p-6 space-y-3"
-                    style={{
-                      boxShadow:
-                        "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                    }}
-                  >
-                    <h3 className="font-extrabold text-gray-900 border-l-4 border-blue-400 pl-3">
-                      Round Manager
-                    </h3>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input
-                        data-ocid="admin.input"
-                        type="number"
-                        placeholder="Round Number (e.g. 1)"
-                        value={roundNum}
-                        onChange={(e) => setRoundNum(e.target.value)}
-                      />
-                      <Input
-                        data-ocid="admin.input"
-                        type="text"
-                        placeholder="Closing Date (e.g. 01 May 2026)"
-                        value={roundDate}
-                        onChange={(e) => setRoundDate(e.target.value)}
-                      />
-                    </div>
-                    <Button
-                      data-ocid="admin.save_button"
-                      onClick={handleSetRound}
-                      disabled={setRoundInfo.isPending}
-                      className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold"
-                    >
-                      {setRoundInfo.isPending ? (
-                        <Loader2 className="animate-spin" size={16} />
-                      ) : (
-                        "Update Round Info"
-                      )}
-                    </Button>
-                  </div>
-
-                  <div
-                    className="bg-white rounded-2xl border border-gray-100 border-l-4 border-l-orange-400 p-6 space-y-4"
-                    style={{
-                      boxShadow:
-                        "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                    }}
-                  >
-                    <div>
-                      <h3 className="font-extrabold text-gray-900 border-l-4 border-orange-400 pl-3">
-                        Paynow Integration
-                      </h3>
-                      <p className="text-sm text-gray-500 mt-1 pl-3">
-                        Configure your Paynow Zimbabwe merchant credentials.
-                        These are stored securely on-chain.
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input
-                        data-ocid="admin.paynow.input"
-                        type="text"
-                        placeholder="Integration ID"
-                        value={paynowIntegrationId}
-                        onChange={(e) => setPaynowIntegrationId(e.target.value)}
-                        className="col-span-2 md:col-span-1"
-                      />
-                      <div className="relative col-span-2 md:col-span-1">
-                        <Input
-                          data-ocid="admin.paynow.input"
-                          type={showPaynowKey ? "text" : "password"}
-                          placeholder="Integration Key"
-                          value={paynowIntegrationKey}
-                          onChange={(e) =>
-                            setPaynowIntegrationKey(e.target.value)
-                          }
-                          className="pr-10"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPaynowKey((v) => !v)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
-                        >
-                          {showPaynowKey ? (
-                            <EyeOff size={16} />
-                          ) : (
-                            <Eye size={16} />
-                          )}
-                        </button>
-                      </div>
-                      <Input
-                        data-ocid="admin.paynow.input"
-                        type="text"
-                        placeholder="https://yourdomain.com/return"
-                        value={paynowReturnUrl}
-                        onChange={(e) => setPaynowReturnUrl(e.target.value)}
-                        className="col-span-2 md:col-span-1"
-                      />
-                      <Input
-                        data-ocid="admin.paynow.input"
-                        type="text"
-                        placeholder="https://yourdomain.com/result"
-                        value={paynowResultUrl}
-                        onChange={(e) => setPaynowResultUrl(e.target.value)}
-                        className="col-span-2 md:col-span-1"
-                      />
-                    </div>
-                    <Button
-                      data-ocid="admin.paynow.save_button"
-                      onClick={handleSavePaynow}
-                      disabled={savePaynowConfig.isPending}
-                      className="w-full bg-green-500 hover:bg-green-600 text-white font-bold"
-                    >
-                      {savePaynowConfig.isPending ? (
-                        <Loader2 className="animate-spin" size={16} />
-                      ) : (
-                        "Save Paynow Config"
-                      )}
-                    </Button>
-                  </div>
-
-                  <div
-                    className="bg-white rounded-2xl border border-purple-100 p-6"
-                    style={{
-                      boxShadow:
-                        "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                    }}
-                  >
-                    <h3 className="font-bold text-purple-700 mb-2 border-l-4 border-purple-400 pl-3">
-                      Sea-Freight Optimizer (LCL)
-                    </h3>
-                    <p className="text-sm text-gray-500 mb-3">
-                      Consolidating non-perishables reduces freight by 65%. 30%
-                      Cap maintained with 18.2% profit margin.
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        data-ocid="admin.checkbox"
-                        id="freight-optimizer"
-                        checked={freightOptimizer}
-                        onCheckedChange={(v) => setFreightOptimizer(!!v)}
-                      />
-                      <label
-                        htmlFor="freight-optimizer"
-                        className="text-xs font-bold uppercase cursor-pointer text-purple-600"
-                      >
-                        Apply &quot;Institutional Cultural Support&quot; Customs
-                        Shield
-                      </label>
-                    </div>
-                  </div>
-                </>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {products.map((product, idx) => (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      cartQty={
+                        cart.find((i) => i.product.id === product.id)?.qty ?? 0
+                      }
+                      onAdd={() => addToCart(product)}
+                      onUpdateQty={(d) => updateQty(product.id, d)}
+                      index={idx + 1}
+                    />
+                  ))}
+                </div>
               )}
             </motion.div>
           )}
 
-          {view === "about" && (
+          {view === "admin" && adminKey && (
             <motion.div
-              key="about"
-              initial={{ opacity: 0, y: 8 }}
+              key="admin"
+              initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ duration: 0.25 }}
             >
-              <div className="bg-white border-b border-gray-100">
-                <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-16 text-center">
-                  <span className="inline-block text-[10px] font-black uppercase tracking-[0.2em] text-blue-500 mb-3">
-                    Our Story
-                  </span>
-                  <h1 className="font-display text-4xl sm:text-5xl font-bold text-gray-900 mb-4">
-                    About Global Rail
-                  </h1>
-                  <p className="text-gray-500 text-lg max-w-xl mx-auto">
-                    Born from the lived experience of Zimbabweans studying
-                    abroad — bridging the distance between home and heart.
-                  </p>
-                </div>
-              </div>
-              <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 space-y-12">
-                <section className="bg-blue-500 rounded-2xl p-8 sm:p-10 text-white text-center">
-                  <h2 className="text-2xl font-black mb-3 font-display">
-                    Our Vision &amp; Mission
-                  </h2>
-                  <p className="text-blue-100 text-sm uppercase tracking-widest font-bold mb-4">
-                    Global Rail — Core Purpose
-                  </p>
-                  <blockquote className="text-xl sm:text-2xl font-bold leading-relaxed">
-                    &ldquo;Making those away from home feel at home without
-                    paying extra.&rdquo;
-                  </blockquote>
-                  <p className="text-blue-100 text-sm mt-4 max-w-xl mx-auto">
-                    We exist to deliver the taste, comfort, and culture of
-                    Zimbabwe to every Zimbabwean student, professional, and
-                    family member living abroad — affordably, reliably, and with
-                    love.
-                  </p>
-                </section>
-
-                <section>
-                  <h2 className="text-2xl font-black text-gray-900 mb-6">
-                    A Word from Our Leadership
-                  </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div
-                      className="bg-white rounded-2xl border border-gray-100 p-7"
-                      style={{
-                        boxShadow:
-                          "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                      }}
-                    >
-                      <div className="flex items-start gap-4 mb-5">
-                        <div
-                          className="w-14 h-14 rounded-full flex items-center justify-center font-black text-white text-lg flex-shrink-0"
-                          style={{ background: "#3b82f6" }}
-                        >
-                          DM
-                        </div>
-                        <div>
-                          <h3 className="font-black text-gray-900 text-base">
-                            Desmond Mahachi
-                          </h3>
-                          <p className="text-blue-500 text-xs font-bold uppercase tracking-wider">
-                            Managing Director
-                          </p>
-                          <p className="text-gray-400 text-xs mt-0.5">
-                            21 yrs · BTech Mechanical Engineering
-                          </p>
-                          <p className="text-gray-400 text-xs">
-                            KIIT University, India
-                          </p>
-                        </div>
-                      </div>
-                      <blockquote className="text-gray-600 text-sm leading-relaxed border-l-2 border-blue-200 pl-4 italic">
-                        &ldquo;Being a Zimbabwean student in India, I know
-                        exactly what it feels like to miss home. The comfort
-                        food, the familiar brands, the sense of belonging that
-                        comes from the simplest things. Global Rail was born
-                        from that longing. We are not just a logistics company —
-                        we are a bridge between who you are and where you are.
-                        My vision is simple: no Zimbabwean abroad should ever
-                        have to choose between their culture and their budget.
-                        Welcome to your home away from home.&rdquo;
-                      </blockquote>
-                    </div>
-                    <div
-                      className="bg-white rounded-2xl border border-gray-100 p-7"
-                      style={{
-                        boxShadow:
-                          "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                      }}
-                    >
-                      <div className="flex items-start gap-4 mb-5">
-                        <div
-                          className="w-14 h-14 rounded-full flex items-center justify-center font-black text-white text-lg flex-shrink-0"
-                          style={{ background: "#8b5cf6" }}
-                        >
-                          MF
-                        </div>
-                        <div>
-                          <h3 className="font-black text-gray-900 text-base">
-                            Moesha Fakazani
-                          </h3>
-                          <p className="text-purple-500 text-xs font-bold uppercase tracking-wider">
-                            Executive Director
-                          </p>
-                          <p className="text-gray-400 text-xs mt-0.5">
-                            20 yrs · BSc Actuarial Science
-                          </p>
-                          <p className="text-gray-400 text-xs">
-                            University of Zimbabwe
-                          </p>
-                        </div>
-                      </div>
-                      <blockquote className="text-gray-600 text-sm leading-relaxed border-l-2 border-purple-200 pl-4 italic">
-                        &ldquo;As someone who understands risk, sustainability,
-                        and the financial pressures students face, I joined
-                        Global Rail to build something that truly serves our
-                        community. Every price we set, every route we plan,
-                        every batch we organise — it all comes down to making
-                        life a little easier for Zimbabweans around the world.
-                        We are young, we are driven, and we are deeply committed
-                        to delivering value without compromise. This is our
-                        promise to you.&rdquo;
-                      </blockquote>
-                    </div>
-                  </div>
-                </section>
-
-                <section>
-                  <h2 className="text-2xl font-black text-gray-900 mb-6">
-                    Our Companies
-                  </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div
-                      className="bg-white rounded-2xl border border-gray-100 p-6"
-                      style={{
-                        boxShadow:
-                          "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                      }}
-                    >
-                      <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center mb-4">
-                        <span className="text-blue-600 font-black text-sm">
-                          MD
-                        </span>
-                      </div>
-                      <h3 className="font-black text-gray-900 text-base mb-1">
-                        Mahachi Desmond Private Limited Company
-                      </h3>
-                      <p className="text-gray-400 text-xs mb-3">
-                        Operating Company · Zimbabwe
-                      </p>
-                      <div className="space-y-2">
-                        <div className="flex items-start gap-2 text-sm text-gray-600">
-                          <MapPin
-                            size={14}
-                            className="text-blue-400 mt-0.5 flex-shrink-0"
-                          />
-                          <span>F19A Kandodo, Zvishavane, Zimbabwe</span>
-                        </div>
-                        <div className="flex items-start gap-2 text-sm text-gray-600">
-                          <Mail
-                            size={14}
-                            className="text-blue-400 mt-0.5 flex-shrink-0"
-                          />
-                          <a
-                            href="mailto:mdprivatelimited2024@gmail.com"
-                            className="text-blue-500 hover:underline break-all"
-                          >
-                            mdprivatelimited2024@gmail.com
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-                    <div
-                      className="bg-white rounded-2xl border border-gray-100 p-6"
-                      style={{
-                        boxShadow:
-                          "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                      }}
-                    >
-                      <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center mb-4">
-                        <span className="text-purple-600 font-black text-sm">
-                          CS
-                        </span>
-                      </div>
-                      <h3 className="font-black text-gray-900 text-base mb-1">
-                        Cool Smarts Ltd
-                      </h3>
-                      <p className="text-gray-400 text-xs mb-3">
-                        Parent Company · United Kingdom
-                      </p>
-                      <div className="space-y-2">
-                        <div className="flex items-start gap-2 text-sm text-gray-600">
-                          <MapPin
-                            size={14}
-                            className="text-purple-400 mt-0.5 flex-shrink-0"
-                          />
-                          <span>128 City Road, London, UK</span>
-                        </div>
-                        <div className="flex items-start gap-2 text-sm text-gray-600">
-                          <Mail
-                            size={14}
-                            className="text-purple-400 mt-0.5 flex-shrink-0"
-                          />
-                          <a
-                            href="mailto:coolsmartszvishavane@gmail.com"
-                            className="text-blue-500 hover:underline break-all"
-                          >
-                            coolsmartszvishavane@gmail.com
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              </div>
-            </motion.div>
-          )}
-
-          {view === "privacy" && (
-            <motion.div
-              key="privacy"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-            >
-              <div className="bg-white border-b border-gray-100">
-                <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10">
-                  <span className="inline-block text-[10px] font-black uppercase tracking-[0.2em] text-blue-500 mb-3">
-                    Legal
-                  </span>
-                  <h1 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-2">
-                    Privacy Policy
-                  </h1>
-                  <p className="text-gray-400 text-sm">
-                    Cool Smarts Ltd / Global Rail · Last updated:{" "}
-                    {new Date().toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "long",
-                      year: "numeric",
-                    })}
-                  </p>
-                </div>
-              </div>
-              <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10">
-                <div
-                  className="bg-white rounded-2xl border border-gray-100 p-8 space-y-8 text-sm text-gray-600 leading-relaxed"
-                  style={{
-                    boxShadow:
-                      "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                  }}
-                >
-                  {[
-                    {
-                      title: "1. Introduction",
-                      content:
-                        'Cool Smarts Ltd ("we", "our", or "us"), operating under the Global Rail brand, is committed to protecting your personal data. This Privacy Policy explains how we collect, use, and safeguard your information when you use our platform.',
-                    },
-                    {
-                      title: "2. Information We Collect",
-                      content:
-                        "We collect information you provide directly, including: your name and contact details when you create an account; order information such as destination country, university or hostel name, and postcode; payment method selection (Paynow or Wise/GBP); Internet Identity principal used for authentication. We also automatically collect usage data such as pages visited and actions taken on the platform.",
-                    },
-                    {
-                      title: "3. How We Use Your Data",
-                      content:
-                        "Your data is used to: process and fulfil your grocery batch orders; communicate with you about your orders and delivery rounds; administer your account and role (standard user or admin); improve our logistics and freight planning; comply with applicable laws and regulations.",
-                    },
-                    {
-                      title: "4. Order Data & Batch Logistics",
-                      content:
-                        "Orders are grouped into batch rounds (e.g. Grocery Round #01). Your order data — including destination, items, and quantities — is shared with our logistics partners and hub coordinators to enable consolidated sea-freight delivery. This data is retained for the duration of the batch round and for record-keeping purposes thereafter.",
-                    },
-                    {
-                      title: "5. Cookies & Local Storage",
-                      content:
-                        "We use browser localStorage to store your privacy consent preference. We do not use tracking cookies for advertising. We may use essential session data to maintain your login state via Internet Identity.",
-                    },
-                    {
-                      title: "6. Third-Party Services",
-                      content:
-                        "We use the following third-party services: Internet Identity (Dfinity) for authentication — governed by their own privacy policy; Paynow Zimbabwe for payment processing; Wise (TransferWise) for international payment processing. We do not sell your data to third parties.",
-                    },
-                    {
-                      title: "7. Your Rights",
-                      content:
-                        "You have the right to: access the personal data we hold about you; request correction of inaccurate data; request deletion of your data (subject to legal retention requirements); withdraw consent at any time. To exercise your rights, contact us at coolsmartszvishavane@gmail.com or mdprivatelimited2024@gmail.com.",
-                    },
-                    {
-                      title: "8. Data Security",
-                      content:
-                        "Your data is stored on-chain using the Internet Computer blockchain, which provides cryptographic security and decentralised redundancy. We implement appropriate technical measures to protect your information from unauthorised access.",
-                    },
-                    {
-                      title: "9. Children's Privacy",
-                      content:
-                        "Global Rail is intended for users aged 16 and over. We do not knowingly collect data from children under 16. If you believe a child has provided us with personal information, please contact us immediately.",
-                    },
-                    {
-                      title: "10. Changes to This Policy",
-                      content:
-                        "We may update this Privacy Policy from time to time. We will notify users of significant changes by displaying a notice on the platform. Continued use of Global Rail after changes constitutes acceptance of the updated policy.",
-                    },
-                    {
-                      title: "11. Contact Us",
-                      content:
-                        "For any privacy-related queries, please contact: Cool Smarts Ltd, 128 City Road, London, UK — coolsmartszvishavane@gmail.com. Mahachi Desmond Private Limited Company, F19A Kandodo, Zvishavane, Zimbabwe — mdprivatelimited2024@gmail.com.",
-                    },
-                  ].map((section) => (
-                    <div key={section.title}>
-                      <h2 className="font-bold text-gray-900 text-base mb-2">
-                        {section.title}
-                      </h2>
-                      <p>{section.content}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <AdminPanel
+                adminKey={adminKey}
+                allOrders={allOrders ?? []}
+                updateStatus={updateStatus}
+                addProduct={addProduct}
+                removeProduct={removeProduct}
+                products={products ?? []}
+                roundNumber={roundNumber}
+                setRoundNumber={setRoundNumber}
+                roundDate={roundDate}
+                setRoundDate={setRoundDate}
+                onSaveRound={handleSaveRound}
+                paynowIntId={paynowIntId}
+                setPaynowIntId={setPaynowIntId}
+                paynowKey={paynowKey}
+                setPaynowKey={setPaynowKey}
+                paynowReturn={paynowReturn}
+                setPaynowReturn={setPaynowReturn}
+                paynowResult={paynowResult}
+                setPaynowResult={setPaynowResult}
+                showPaynowKey={showPaynowKey}
+                setShowPaynowKey={setShowPaynowKey}
+                onSavePaynow={handleSavePaynow}
+                newProductName={newProductName}
+                setNewProductName={setNewProductName}
+                newProductPrice={newProductPrice}
+                setNewProductPrice={setNewProductPrice}
+                newProductOrigin={newProductOrigin}
+                setNewProductOrigin={setNewProductOrigin}
+                newProductCategory={newProductCategory}
+                setNewProductCategory={setNewProductCategory}
+                oldPass={oldPass}
+                setOldPass={setOldPass}
+                newPass={newPass}
+                setNewPass={setNewPass}
+                confirmPass={confirmPass}
+                setConfirmPass={setConfirmPass}
+                onChangePassword={handleChangePassword}
+                freightOptimizer={freightOptimizer}
+                setFreightOptimizer={setFreightOptimizer}
+                isSavingRound={setRound.isPending}
+                isSavingPaynow={setPaynow.isPending}
+                isChangingPass={changePass.isPending}
+              />
             </motion.div>
           )}
 
           {view === "myorders" && (
             <motion.div
               key="myorders"
-              initial={{ opacity: 0, y: 8 }}
+              initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ duration: 0.25 }}
             >
-              <div className="bg-white border-b border-gray-100">
-                <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
-                  <h1 className="text-2xl font-black text-gray-900 mb-1">
-                    My Orders
-                  </h1>
-                  <p className="text-gray-500 text-sm">
-                    Track and confirm your batch orders.
-                  </p>
-                </div>
-              </div>
-              <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-                {!isLoggedIn ? (
-                  <div
-                    data-ocid="myorders.empty_state"
-                    className="text-center py-16 bg-blue-50 rounded-2xl border border-blue-100"
-                  >
-                    <Package size={40} className="mx-auto text-blue-300 mb-3" />
-                    <p className="font-bold text-gray-700 mb-1">
-                      You are not logged in
-                    </p>
-                    <p className="text-gray-400 text-sm mb-4">
-                      Please login to view your orders.
-                    </p>
-                    <Button
-                      onClick={login}
-                      className="bg-blue-500 hover:bg-blue-600 text-white font-bold"
-                    >
-                      Login to View Orders
-                    </Button>
-                  </div>
-                ) : myOrders.length === 0 ? (
-                  <div
-                    data-ocid="myorders.empty_state"
-                    className="text-center py-16 bg-gray-50 rounded-2xl border border-gray-100"
-                  >
-                    <Package size={40} className="mx-auto text-gray-300 mb-3" />
-                    <p className="font-bold text-gray-700 mb-1">
-                      No orders yet
-                    </p>
-                    <p className="text-gray-400 text-sm mb-4">
-                      Your orders will appear here once you place them.
-                    </p>
-                    <Button
-                      onClick={() => setView("store")}
-                      className="bg-blue-500 hover:bg-blue-600 text-white font-bold"
-                    >
-                      Start Shopping
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {myOrders.map((order, idx) => {
-                      const statusKey = (order as any).status
-                        ? Object.keys((order as any).status as object)[0]
-                        : "pendingPayment";
-                      const statusLabels: Record<
-                        string,
-                        { label: string; cls: string }
-                      > = {
-                        pendingPayment: {
-                          label: "Pending Payment",
-                          cls: "bg-yellow-100 text-yellow-700 border-yellow-200",
-                        },
-                        paymentConfirmed: {
-                          label: "Payment Confirmed",
-                          cls: "bg-blue-100 text-blue-700 border-blue-200",
-                        },
-                        shipped: {
-                          label: "Shipped",
-                          cls: "bg-purple-100 text-purple-700 border-purple-200",
-                        },
-                        delivered: {
-                          label: "Delivered",
-                          cls: "bg-green-100 text-green-700 border-green-200",
-                        },
-                        receivedByUser: {
-                          label: "Received ✓",
-                          cls: "bg-gray-100 text-gray-600 border-gray-200",
-                        },
-                      };
-                      const statusInfo =
-                        statusLabels[statusKey] ?? statusLabels.pendingPayment;
-                      const datePlaced = new Date(
-                        Number(order.timestamp) / 1_000_000,
-                      );
-                      return (
-                        <div
-                          key={Number(order.id)}
-                          data-ocid={`myorders.item.${idx + 1}`}
-                          className="bg-white rounded-2xl border border-gray-100 p-5"
-                          style={{
-                            boxShadow:
-                              "0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
-                          }}
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
-                            <div>
-                              <p className="font-black text-gray-900 text-base">
-                                Order #{Number(order.id)}
-                              </p>
-                              <p className="text-gray-400 text-xs mt-0.5">
-                                Placed{" "}
-                                {datePlaced.toLocaleDateString("en-GB", {
-                                  day: "numeric",
-                                  month: "short",
-                                  year: "numeric",
-                                })}
-                              </p>
-                            </div>
-                            <span
-                              className={`px-3 py-1 rounded-full text-xs font-bold border ${statusInfo.cls}`}
-                            >
-                              {statusInfo.label}
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-4">
-                            <div className="bg-gray-50 rounded-xl p-3">
-                              <p className="text-gray-400 text-xs mb-0.5">
-                                Items
-                              </p>
-                              <p className="font-bold text-gray-800">
-                                {order.itemIds.length}
-                              </p>
-                            </div>
-                            <div className="bg-gray-50 rounded-xl p-3">
-                              <p className="text-gray-400 text-xs mb-0.5">
-                                Destination
-                              </p>
-                              <p className="font-bold text-gray-800">
-                                {order.destination}
-                              </p>
-                            </div>
-                            <div className="bg-gray-50 rounded-xl p-3">
-                              <p className="text-gray-400 text-xs mb-0.5">
-                                University
-                              </p>
-                              <p className="font-bold text-gray-800 truncate">
-                                {order.university}
-                              </p>
-                            </div>
-                            <div className="bg-gray-50 rounded-xl p-3">
-                              <p className="text-gray-400 text-xs mb-0.5">
-                                Payment
-                              </p>
-                              <p className="font-bold text-gray-800">
-                                {order.paymentMethod === "online"
-                                  ? "Wise/GBP"
-                                  : "Paynow"}
-                              </p>
-                            </div>
-                          </div>
-                          {statusKey === "delivered" && (
-                            <Button
-                              data-ocid={`myorders.confirm_button.${idx + 1}`}
-                              onClick={() =>
-                                confirmOrderReceived.mutate(order.id)
-                              }
-                              disabled={confirmOrderReceived.isPending}
-                              className="bg-green-500 hover:bg-green-600 text-white font-bold text-sm"
-                            >
-                              {confirmOrderReceived.isPending ? (
-                                <Loader2
-                                  className="animate-spin mr-2"
-                                  size={14}
-                                />
-                              ) : null}
-                              Confirm Receipt
-                            </Button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              <MyOrdersView
+                isLoggedIn={isLoggedIn}
+                onLogin={login}
+                myOrders={myOrders ?? []}
+                isLoading={loadingMyOrders}
+                onConfirmReceived={(id) => confirmReceived.mutate(id)}
+                confirming={confirmReceived.isPending}
+              />
+            </motion.div>
+          )}
+
+          {view === "about" && (
+            <motion.div
+              key="about"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ duration: 0.25 }}
+            >
+              <AboutView />
+            </motion.div>
+          )}
+
+          {view === "privacy" && (
+            <motion.div
+              key="privacy"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ duration: 0.25 }}
+            >
+              <PrivacyView />
             </motion.div>
           )}
         </AnimatePresence>
       </main>
 
       {/* FOOTER */}
-      <footer className="bg-white border-t border-gray-100 mt-auto">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <GRLogo />
-                <span className="font-black text-gray-900">
-                  GLOBAL <span className="text-blue-500">RAIL</span>
-                </span>
-              </div>
-              <p className="text-gray-400 text-sm leading-relaxed">
-                Making those away from home feel at home without paying extra.
-              </p>
-            </div>
-            <div>
-              <h4 className="font-bold text-gray-700 text-sm mb-3 uppercase tracking-wider">
-                Navigate
-              </h4>
-              <ul className="space-y-2">
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => setView("store")}
-                    className="text-gray-400 hover:text-blue-500 text-sm transition"
-                  >
-                    Shop
-                  </button>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => setView("about")}
-                    className="text-gray-400 hover:text-blue-500 text-sm transition"
-                  >
-                    About Us
-                  </button>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => setView("privacy")}
-                    className="text-gray-400 hover:text-blue-500 text-sm transition"
-                  >
-                    Privacy Policy
-                  </button>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-bold text-gray-700 text-sm mb-3 uppercase tracking-wider">
-                Contact
-              </h4>
-              <ul className="space-y-2 text-sm text-gray-400">
-                <li className="flex items-start gap-1.5">
-                  <MapPin
-                    size={13}
-                    className="text-blue-400 mt-0.5 flex-shrink-0"
-                  />
-                  <span>F19A Kandodo, Zvishavane, ZW</span>
-                </li>
-                <li className="flex items-start gap-1.5">
-                  <MapPin
-                    size={13}
-                    className="text-purple-400 mt-0.5 flex-shrink-0"
-                  />
-                  <span>128 City Road, London, UK</span>
-                </li>
-                <li className="flex items-start gap-1.5">
-                  <Mail
-                    size={13}
-                    className="text-blue-400 mt-0.5 flex-shrink-0"
-                  />
-                  <a
-                    href="mailto:coolsmartszvishavane@gmail.com"
-                    className="hover:text-blue-500 transition break-all"
-                  >
-                    coolsmartszvishavane@gmail.com
-                  </a>
-                </li>
-              </ul>
-            </div>
-          </div>
-          <div className="border-t border-gray-100 pt-6 flex flex-col sm:flex-row items-center justify-between gap-2">
-            <p className="text-xs text-gray-400">
-              © {new Date().getFullYear()} Cool Smarts Ltd / Mahachi Desmond
-              Private Limited Company. All rights reserved.
-            </p>
-            <p className="text-xs text-gray-300">
-              Built with ❤️ using{" "}
-              <a
-                href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(typeof window !== "undefined" ? window.location.hostname : "")}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-gray-500 transition"
-              >
-                caffeine.ai
-              </a>
-            </p>
-          </div>
-        </div>
+      <footer className="border-t border-border py-6 text-center text-sm text-muted-foreground">
+        <p>
+          © {new Date().getFullYear()} Cool Smarts LTD · Global Rail. Built with
+          ❤️ using{" "}
+          <a
+            href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="underline hover:text-foreground"
+          >
+            caffeine.ai
+          </a>
+        </p>
       </footer>
 
-      {/* PRIVACY BANNER */}
-      <AnimatePresence>
-        {!privacyAccepted && (
-          <motion.div
-            initial={{ y: 80, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 80, opacity: 0 }}
-            className="fixed bottom-0 left-0 right-0 z-50 bg-gray-900 text-white px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-3"
-          >
-            <p className="text-sm text-gray-300 text-center sm:text-left">
-              We use cookies and process your data to provide our services. By
-              using Global Rail, you agree to our{" "}
+      {/* ADMIN MODAL */}
+      <Dialog open={adminModalOpen} onOpenChange={setAdminModalOpen}>
+        <DialogContent data-ocid="admin.dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="w-5 h-5 text-accent" />
+              Admin Access
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="admin-pass">Enter admin password</Label>
+              <Input
+                id="admin-pass"
+                type="password"
+                placeholder="Password"
+                value={adminPassInput}
+                onChange={(e) => setAdminPassInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAdminLogin()}
+                data-ocid="admin.input"
+              />
+            </div>
+            <Button
+              className="w-full"
+              onClick={handleAdminLogin}
+              disabled={checkPass.isPending || !adminPassInput.trim()}
+              data-ocid="admin.submit_button"
+            >
+              {checkPass.isPending ? "Verifying..." : "Unlock Admin Panel"}
+            </Button>
+            {checkPass.isError && (
+              <p
+                className="text-destructive text-sm text-center"
+                data-ocid="admin.error_state"
+              >
+                Failed to verify — please try again
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* CART DRAWER */}
+      <Sheet open={cartOpen} onOpenChange={setCartOpen}>
+        <SheetContent
+          className="w-full sm:max-w-lg flex flex-col"
+          data-ocid="cart.sheet"
+        >
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5" /> Empire Box
+            </SheetTitle>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto mt-4 space-y-3">
+            {cart.length === 0 ? (
+              <div
+                className="text-center py-12 text-muted-foreground"
+                data-ocid="cart.empty_state"
+              >
+                <ShoppingCart className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p>Your cart is empty</p>
+              </div>
+            ) : (
+              cart.map((item, idx) => (
+                <div
+                  key={item.product.id}
+                  className="flex items-center gap-3 p-3 rounded-lg border border-border"
+                  data-ocid={`cart.item.${idx + 1}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">
+                      {item.product.name}
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      {formatPrice(item.product.retailPrice)} each
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => updateQty(item.product.id, -1)}
+                      className="p-1 rounded hover:bg-muted"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <span className="w-6 text-center text-sm">{item.qty}</span>
+                    <button
+                      type="button"
+                      onClick={() => updateQty(item.product.id, 1)}
+                      className="p-1 rounded hover:bg-muted"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <p className="text-sm font-medium w-16 text-right">
+                    ${(item.product.retailPrice * 1.3 * item.qty).toFixed(2)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => updateQty(item.product.id, -item.qty)}
+                    className="p-1 text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          {cart.length > 0 && (
+            <div className="space-y-4 pt-4 border-t border-border">
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label>Destination</Label>
+                  <Select value={destination} onValueChange={setDestination}>
+                    <SelectTrigger data-ocid="cart.destination.select">
+                      <SelectValue placeholder="Select destination" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DESTINATIONS.map((d) => (
+                        <SelectItem key={d} value={d}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>University / Hostel</Label>
+                  <Input
+                    placeholder="e.g. KIIT University"
+                    value={university}
+                    onChange={(e) => setUniversity(e.target.value)}
+                    data-ocid="cart.university.input"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Pincode</Label>
+                  <Input
+                    placeholder="Postal code"
+                    value={pincode}
+                    onChange={(e) => setPincode(e.target.value)}
+                    data-ocid="cart.pincode.input"
+                  />
+                </div>
+                <label
+                  className="flex items-center gap-2 text-sm cursor-pointer"
+                  data-ocid="cart.privacy.checkbox"
+                >
+                  <input
+                    type="checkbox"
+                    checked={privacyAccepted}
+                    onChange={(e) => setPrivacyAccepted(e.target.checked)}
+                    className="rounded border-border"
+                  />
+                  <span>
+                    I accept the{" "}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCartOpen(false);
+                        setView("privacy");
+                      }}
+                      className="underline text-primary"
+                    >
+                      Privacy Policy
+                    </button>
+                  </span>
+                </label>
+              </div>
+
+              <Separator />
+
+              <div className="flex justify-between font-bold text-lg">
+                <span>Total</span>
+                <span className={cartTotal < 50 ? "text-destructive" : ""}>
+                  ${cartTotal.toFixed(2)}
+                  {cartTotal < 50 && (
+                    <span className="text-xs font-normal ml-1">(min $50)</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  onClick={() => handleCheckout(PaymentMethod.online)}
+                  disabled={
+                    cartTotal < 50 || placeOrder.isPending || !privacyAccepted
+                  }
+                  data-ocid="cart.paynow.primary_button"
+                  className="bg-primary text-primary-foreground"
+                >
+                  Paynow (Zim)
+                </Button>
+                <Button
+                  onClick={() => handleCheckout(PaymentMethod.cashOnDelivery)}
+                  disabled={
+                    cartTotal < 50 || placeOrder.isPending || !privacyAccepted
+                  }
+                  data-ocid="cart.wise.secondary_button"
+                  variant="outline"
+                >
+                  Wise/GBP
+                </Button>
+              </div>
+              {!isLoggedIn && (
+                <p className="text-xs text-muted-foreground text-center">
+                  <Button
+                    variant="link"
+                    className="p-0 h-auto text-xs"
+                    onClick={login}
+                  >
+                    Log in
+                  </Button>{" "}
+                  to place an order
+                </p>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* PRIVACY CONSENT BANNER */}
+      {showPrivacyBanner && (
+        <motion.div
+          initial={{ y: 100, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border p-4 shadow-lg"
+          data-ocid="privacy.toast"
+        >
+          <div className="max-w-3xl mx-auto flex flex-col sm:flex-row items-center gap-3">
+            <p className="text-sm text-muted-foreground flex-1">
+              We use cookies to improve your experience. Read our{" "}
               <button
                 type="button"
                 onClick={() => setView("privacy")}
-                className="underline text-blue-400 hover:text-blue-300"
+                className="underline text-primary"
               >
                 Privacy Policy
               </button>
               .
             </p>
             <Button
-              onClick={acceptPrivacy}
-              className="bg-blue-500 hover:bg-blue-600 text-white font-bold text-sm px-6 flex-shrink-0"
+              size="sm"
+              onClick={() => {
+                localStorage.setItem("gr_privacy_accepted", "1");
+                setShowPrivacyBanner(false);
+              }}
+              data-ocid="privacy.accept.primary_button"
             >
               Accept
             </Button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </motion.div>
+      )}
+    </div>
+  );
+}
+
+// ── ProductCard ──────────────────────────────────────────────────────────────
+function ProductCard({
+  product,
+  cartQty,
+  onAdd,
+  onUpdateQty,
+  index,
+}: {
+  product: Product;
+  cartQty: number;
+  onAdd: () => void;
+  onUpdateQty: (delta: number) => void;
+  index: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.05 }}
+      data-ocid={`products.item.${index}`}
+    >
+      <Card className="h-full flex flex-col shadow-sm hover:shadow-md transition-shadow">
+        <CardContent className="p-5 flex flex-col h-full">
+          <div className="flex items-start justify-between mb-3">
+            <h3 className="font-display font-semibold text-lg leading-snug">
+              {product.name}
+            </h3>
+            <span className="font-bold text-primary ml-2 shrink-0">
+              {formatPrice(product.retailPrice)}
+            </span>
+          </div>
+          <div className="flex gap-1.5 mb-4 flex-wrap">
+            <Badge variant="secondary" className="text-xs">
+              {product.origin}
+            </Badge>
+            <Badge variant="outline" className="text-xs">
+              {product.category}
+            </Badge>
+          </div>
+          <div className="mt-auto">
+            {cartQty === 0 ? (
+              <Button
+                className="w-full"
+                onClick={onAdd}
+                data-ocid={`products.add_button.${index}`}
+              >
+                <Plus className="w-4 h-4 mr-1" /> Add to Box
+              </Button>
+            ) : (
+              <div className="flex items-center justify-between bg-muted rounded-lg p-1">
+                <button
+                  type="button"
+                  onClick={() => onUpdateQty(-1)}
+                  className="p-2 rounded hover:bg-background transition-colors"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                <span className="font-semibold">{cartQty}</span>
+                <button
+                  type="button"
+                  onClick={() => onUpdateQty(1)}
+                  className="p-2 rounded hover:bg-background transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+// ── AdminPanel ───────────────────────────────────────────────────────────────
+function AdminPanel(props: {
+  adminKey: string;
+  allOrders: ReturnType<typeof useGetAllOrders>["data"] & object[];
+  updateStatus: ReturnType<typeof useUpdateOrderStatus>;
+  addProduct: ReturnType<typeof useAddProduct>;
+  removeProduct: ReturnType<typeof useRemoveProduct>;
+  products: Product[];
+  roundNumber: string;
+  setRoundNumber: (v: string) => void;
+  roundDate: string;
+  setRoundDate: (v: string) => void;
+  onSaveRound: () => void;
+  paynowIntId: string;
+  setPaynowIntId: (v: string) => void;
+  paynowKey: string;
+  setPaynowKey: (v: string) => void;
+  paynowReturn: string;
+  setPaynowReturn: (v: string) => void;
+  paynowResult: string;
+  setPaynowResult: (v: string) => void;
+  showPaynowKey: boolean;
+  setShowPaynowKey: (v: boolean) => void;
+  onSavePaynow: () => void;
+  newProductName: string;
+  setNewProductName: (v: string) => void;
+  newProductPrice: string;
+  setNewProductPrice: (v: string) => void;
+  newProductOrigin: string;
+  setNewProductOrigin: (v: string) => void;
+  newProductCategory: string;
+  setNewProductCategory: (v: string) => void;
+  oldPass: string;
+  setOldPass: (v: string) => void;
+  newPass: string;
+  setNewPass: (v: string) => void;
+  confirmPass: string;
+  setConfirmPass: (v: string) => void;
+  onChangePassword: () => void;
+  freightOptimizer: boolean;
+  setFreightOptimizer: (v: boolean) => void;
+  isSavingRound: boolean;
+  isSavingPaynow: boolean;
+  isChangingPass: boolean;
+}) {
+  const {
+    adminKey,
+    allOrders,
+    updateStatus,
+    addProduct,
+    removeProduct,
+    products,
+  } = props;
+
+  const handleAddProduct = async () => {
+    if (!props.newProductName || !props.newProductPrice) return;
+    try {
+      await addProduct.mutateAsync({
+        adminKey,
+        name: props.newProductName,
+        retailPrice: Number(props.newProductPrice),
+        origin: props.newProductOrigin,
+        category: props.newProductCategory,
+      });
+      props.setNewProductName("");
+      props.setNewProductPrice("");
+      props.setNewProductOrigin("");
+      props.setNewProductCategory("");
+      toast.success("Product added");
+    } catch {
+      toast.error("Failed to add product");
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-center gap-3">
+        <Shield className="w-7 h-7 text-accent" />
+        <h2 className="font-display text-2xl font-bold">Admin Dashboard</h2>
+      </div>
+
+      {/* Add Product */}
+      <Card data-ocid="admin.product.panel">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Package className="w-5 h-5" /> Product Rail Manager
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Label>Name</Label>
+              <Input
+                value={props.newProductName}
+                onChange={(e) => props.setNewProductName(e.target.value)}
+                placeholder="Mazoe Orange Crush"
+                data-ocid="admin.product.name.input"
+              />
+            </div>
+            <div>
+              <Label>Retail Price (USD)</Label>
+              <Input
+                type="number"
+                value={props.newProductPrice}
+                onChange={(e) => props.setNewProductPrice(e.target.value)}
+                placeholder="4.50"
+                data-ocid="admin.product.price.input"
+              />
+            </div>
+            <div>
+              <Label>Origin</Label>
+              <Input
+                value={props.newProductOrigin}
+                onChange={(e) => props.setNewProductOrigin(e.target.value)}
+                placeholder="Zimbabwe"
+                data-ocid="admin.product.origin.input"
+              />
+            </div>
+            <div>
+              <Label>Category</Label>
+              <Input
+                value={props.newProductCategory}
+                onChange={(e) => props.setNewProductCategory(e.target.value)}
+                placeholder="Beverages"
+                data-ocid="admin.product.category.input"
+              />
+            </div>
+          </div>
+          <Button
+            onClick={handleAddProduct}
+            disabled={addProduct.isPending}
+            data-ocid="admin.product.add.primary_button"
+          >
+            <Plus className="w-4 h-4 mr-1" /> Add Product
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Products list */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">
+            Current Products ({products.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {products.length === 0 ? (
+            <p
+              className="text-muted-foreground text-sm"
+              data-ocid="admin.products.empty_state"
+            >
+              No products yet.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {products.map((p, idx) => (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-3 p-2 rounded border border-border"
+                  data-ocid={`admin.products.item.${idx + 1}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium text-sm">{p.name}</span>
+                    <span className="text-muted-foreground text-xs ml-2">
+                      {p.origin} · {p.category}
+                    </span>
+                  </div>
+                  <span className="text-sm font-bold text-primary">
+                    {formatPrice(p.retailPrice)}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      removeProduct.mutate({ adminKey, productId: p.id })
+                    }
+                    data-ocid={`admin.products.delete_button.${idx + 1}`}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Orders */}
+      <Card data-ocid="admin.orders.panel">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Truck className="w-5 h-5" /> Institutional Stock Sync / Orders
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!allOrders || allOrders.length === 0 ? (
+            <p
+              className="text-muted-foreground text-sm"
+              data-ocid="admin.orders.empty_state"
+            >
+              No orders yet.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table data-ocid="admin.orders.table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Destination</TableHead>
+                    <TableHead>University</TableHead>
+                    <TableHead>Items</TableHead>
+                    <TableHead>Payment</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allOrders.map((order, idx) => (
+                    <TableRow
+                      key={String(order.id)}
+                      data-ocid={`admin.orders.row.${idx + 1}`}
+                    >
+                      <TableCell className="text-xs text-muted-foreground">
+                        #{String(order.id)}
+                      </TableCell>
+                      <TableCell>{order.destination}</TableCell>
+                      <TableCell>{order.university}</TableCell>
+                      <TableCell>{order.itemIds.length}</TableCell>
+                      <TableCell className="capitalize">
+                        {order.paymentMethod}
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={order.status}
+                          onValueChange={(v) =>
+                            updateStatus.mutate({
+                              adminKey,
+                              orderId: order.id,
+                              status: v as OrderStatus,
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            className="h-8 text-xs w-40"
+                            data-ocid={`admin.orders.status.select.${idx + 1}`}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.values(OrderStatus).map((s) => (
+                              <SelectItem key={s} value={s} className="text-xs">
+                                {STATUS_LABELS[s]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Round Manager */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Clock className="w-5 h-5" /> Round Manager
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Round Number</Label>
+              <Input
+                type="number"
+                value={props.roundNumber}
+                onChange={(e) => props.setRoundNumber(e.target.value)}
+                data-ocid="admin.round.number.input"
+              />
+            </div>
+            <div>
+              <Label>Closing Date</Label>
+              <Input
+                type="date"
+                value={props.roundDate}
+                onChange={(e) => props.setRoundDate(e.target.value)}
+                data-ocid="admin.round.date.input"
+              />
+            </div>
+          </div>
+          <Button
+            onClick={props.onSaveRound}
+            disabled={props.isSavingRound}
+            data-ocid="admin.round.save.primary_button"
+          >
+            {props.isSavingRound ? "Saving..." : "Save Round Info"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Paynow Integration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Settings className="w-5 h-5" /> Paynow Integration
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Label>Integration ID</Label>
+              <Input
+                value={props.paynowIntId}
+                onChange={(e) => props.setPaynowIntId(e.target.value)}
+                data-ocid="admin.paynow.id.input"
+              />
+            </div>
+            <div>
+              <Label>Integration Key</Label>
+              <div className="relative">
+                <Input
+                  type={props.showPaynowKey ? "text" : "password"}
+                  value={props.paynowKey}
+                  onChange={(e) => props.setPaynowKey(e.target.value)}
+                  data-ocid="admin.paynow.key.input"
+                />
+                <button
+                  type="button"
+                  onClick={() => props.setShowPaynowKey(!props.showPaynowKey)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                >
+                  {props.showPaynowKey ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+            <div>
+              <Label>Return URL</Label>
+              <Input
+                value={props.paynowReturn}
+                onChange={(e) => props.setPaynowReturn(e.target.value)}
+                placeholder="https://..."
+                data-ocid="admin.paynow.return.input"
+              />
+            </div>
+            <div>
+              <Label>Result URL</Label>
+              <Input
+                value={props.paynowResult}
+                onChange={(e) => props.setPaynowResult(e.target.value)}
+                placeholder="https://..."
+                data-ocid="admin.paynow.result.input"
+              />
+            </div>
+          </div>
+          <Button
+            onClick={props.onSavePaynow}
+            disabled={props.isSavingPaynow}
+            data-ocid="admin.paynow.save.primary_button"
+          >
+            {props.isSavingPaynow ? "Saving..." : "Save Paynow Config"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Change Password */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Lock className="w-5 h-5" /> Change Admin Password
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div>
+            <Label>Current Password</Label>
+            <Input
+              type="password"
+              value={props.oldPass}
+              onChange={(e) => props.setOldPass(e.target.value)}
+              data-ocid="admin.changepass.old.input"
+            />
+          </div>
+          <div>
+            <Label>New Password</Label>
+            <Input
+              type="password"
+              value={props.newPass}
+              onChange={(e) => props.setNewPass(e.target.value)}
+              data-ocid="admin.changepass.new.input"
+            />
+          </div>
+          <div>
+            <Label>Confirm New Password</Label>
+            <Input
+              type="password"
+              value={props.confirmPass}
+              onChange={(e) => props.setConfirmPass(e.target.value)}
+              data-ocid="admin.changepass.confirm.input"
+            />
+          </div>
+          <Button
+            onClick={props.onChangePassword}
+            disabled={props.isChangingPass}
+            data-ocid="admin.changepass.save.primary_button"
+          >
+            {props.isChangingPass ? "Saving..." : "Change Password"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Sea-Freight Optimizer */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <MapPin className="w-5 h-5" /> Sea-Freight Optimizer
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-3">
+            <Switch
+              checked={props.freightOptimizer}
+              onCheckedChange={props.setFreightOptimizer}
+              data-ocid="admin.freight.toggle"
+            />
+            <span className="text-sm">
+              {props.freightOptimizer
+                ? "Customs shield ACTIVE — optimizing routes"
+                : "Customs shield inactive"}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── MyOrdersView ─────────────────────────────────────────────────────────────
+function MyOrdersView({
+  isLoggedIn,
+  onLogin,
+  myOrders,
+  isLoading,
+  onConfirmReceived,
+  confirming,
+}: {
+  isLoggedIn: boolean;
+  onLogin: () => void;
+  myOrders: ReturnType<typeof useGetMyOrders>["data"] & object[];
+  isLoading: boolean;
+  onConfirmReceived: (id: bigint) => void;
+  confirming: boolean;
+}) {
+  if (!isLoggedIn) {
+    return (
+      <div className="text-center py-20">
+        <Package className="w-12 h-12 mx-auto mb-4 text-muted-foreground/40" />
+        <h2 className="font-display text-2xl font-bold mb-2">My Orders</h2>
+        <p className="text-muted-foreground mb-6">Log in to view your orders</p>
+        <Button onClick={onLogin} data-ocid="myorders.login.primary_button">
+          <LogIn className="w-4 h-4 mr-2" /> Log In
+        </Button>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4" data-ocid="myorders.loading_state">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-32 rounded-xl" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!myOrders?.length) {
+    return (
+      <div
+        className="text-center py-20 text-muted-foreground"
+        data-ocid="myorders.empty_state"
+      >
+        <Package className="w-12 h-12 mx-auto mb-3 opacity-40" />
+        <p className="text-lg">No orders yet — go shop!</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <h2 className="font-display text-2xl font-bold">My Orders</h2>
+      {myOrders.map((order, idx) => (
+        <Card
+          key={String(order.id)}
+          data-ocid={`myorders.item.${idx + 1}`}
+          className="shadow-sm"
+        >
+          <CardContent className="p-5">
+            <div className="flex items-start justify-between flex-wrap gap-3">
+              <div>
+                <p className="font-semibold">Order #{String(order.id)}</p>
+                <p className="text-sm text-muted-foreground">
+                  {order.destination} · {order.university}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {order.itemIds.length} item(s) · {order.paymentMethod}
+                </p>
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <span
+                  className={`text-xs font-medium px-2 py-1 rounded-full ${STATUS_COLORS[order.status]}`}
+                >
+                  {STATUS_LABELS[order.status]}
+                </span>
+                {order.status === OrderStatus.delivered && (
+                  <Button
+                    size="sm"
+                    onClick={() => onConfirmReceived(order.id)}
+                    disabled={confirming}
+                    data-ocid={`myorders.confirm.primary_button.${idx + 1}`}
+                  >
+                    <CheckCircle className="w-4 h-4 mr-1" /> Confirm Receipt
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ── AboutView ────────────────────────────────────────────────────────────────
+function AboutView() {
+  return (
+    <div className="max-w-3xl mx-auto space-y-10">
+      <div>
+        <h2 className="font-display text-3xl font-bold mb-3">
+          About Global Rail
+        </h2>
+        <p className="text-lg text-muted-foreground">
+          <em>
+            "Making those away from home feel at home without paying extra."
+          </em>
+        </p>
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-6">
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+              <span className="text-2xl">👨‍💼</span>
+            </div>
+            <h3 className="font-display font-bold text-lg">Desmond Mahachi</h3>
+            <p className="text-sm text-accent font-medium mb-2">
+              Managing Director
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Age 21 · BTech Mechanical Engineering
+              <br />
+              KIIT University, India
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center mb-4">
+              <span className="text-2xl">👩‍💼</span>
+            </div>
+            <h3 className="font-display font-bold text-lg">Moesha Fakazani</h3>
+            <p className="text-sm text-accent font-medium mb-2">
+              Executive Director
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Age 20 · BSc Actuarial Science
+              <br />
+              University of Zimbabwe
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="shadow-sm">
+        <CardContent className="p-6 space-y-4">
+          <h3 className="font-display font-bold text-xl">Contact Us</h3>
+          <div className="grid sm:grid-cols-2 gap-4 text-sm">
+            <div>
+              <p className="font-semibold">Cool Smarts Ltd</p>
+              <p className="text-muted-foreground">128 City Road, London, UK</p>
+              <a
+                href="mailto:coolsmartszvishavane@gmail.com"
+                className="text-primary hover:underline"
+              >
+                coolsmartszvishavane@gmail.com
+              </a>
+            </div>
+            <div>
+              <p className="font-semibold">Mahachi Desmond Pvt Ltd</p>
+              <p className="text-muted-foreground">
+                F19A Kandodo, Zvishavane, Zimbabwe
+              </p>
+              <a
+                href="mailto:mdprivatelimited2024@gmail.com"
+                className="text-primary hover:underline"
+              >
+                mdprivatelimited2024@gmail.com
+              </a>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── PrivacyView ──────────────────────────────────────────────────────────────
+function PrivacyView() {
+  return (
+    <div className="max-w-3xl mx-auto space-y-6">
+      <h2 className="font-display text-3xl font-bold">Privacy Policy</h2>
+      <p className="text-sm text-muted-foreground">Last updated: March 2026</p>
+
+      {[
+        {
+          title: "Information We Collect",
+          body: "We collect your Internet Identity principal, delivery destination, university or hostel name, and pincode when you place an order. We do not collect payment card details directly.",
+        },
+        {
+          title: "How We Use Your Information",
+          body: "Your information is used solely to fulfil your order — including coordinating batch logistics, calculating freight, and communicating delivery status. We do not sell or share your data with third parties.",
+        },
+        {
+          title: "International Transfers",
+          body: "Orders are processed internationally across Zimbabwe, India, UK, Poland, and UAE. Data may be processed in any of these regions as part of the logistics workflow.",
+        },
+        {
+          title: "Data Retention",
+          body: "Order and profile data is stored on-chain and retained indefinitely as part of the immutable ledger. You may request account deletion by contacting us.",
+        },
+        {
+          title: "Your Rights",
+          body: "Under applicable data protection laws, you have rights to access, correct, or delete your personal data. Contact coolsmartszvishavane@gmail.com to exercise these rights.",
+        },
+        {
+          title: "Cookies",
+          body: "We use only a single local-storage flag (gr_privacy_accepted) to remember your consent. No tracking or advertising cookies are used.",
+        },
+        {
+          title: "Contact",
+          body: "For privacy enquiries: coolsmartszvishavane@gmail.com | Cool Smarts Ltd, 128 City Road, London, UK.",
+        },
+      ].map((section) => (
+        <Card key={section.title} className="shadow-sm">
+          <CardContent className="p-6">
+            <h3 className="font-semibold mb-2">{section.title}</h3>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              {section.body}
+            </p>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }

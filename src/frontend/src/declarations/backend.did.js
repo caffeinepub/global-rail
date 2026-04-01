@@ -13,19 +13,20 @@ export const UserRole = IDL.Variant({
   'user' : IDL.Null,
   'guest' : IDL.Null,
 });
+export const OrderStatus = IDL.Variant({
+  'shipped' : IDL.Null,
+  'paymentConfirmed' : IDL.Null,
+  'pendingPayment' : IDL.Null,
+  'receivedByUser' : IDL.Null,
+  'delivered' : IDL.Null,
+});
 export const PaymentMethod = IDL.Variant({
   'cashOnDelivery' : IDL.Null,
   'online' : IDL.Null,
 });
-export const OrderStatus = IDL.Variant({
-  'pendingPayment' : IDL.Null,
-  'paymentConfirmed' : IDL.Null,
-  'shipped' : IDL.Null,
-  'delivered' : IDL.Null,
-  'receivedByUser' : IDL.Null,
-});
-export const OrderData = IDL.Record({
+export const OrderDataWithStatus = IDL.Record({
   'id' : IDL.Nat64,
+  'status' : OrderStatus,
   'destination' : IDL.Text,
   'paymentMethod' : PaymentMethod,
   'user' : IDL.Principal,
@@ -33,7 +34,6 @@ export const OrderData = IDL.Record({
   'timestamp' : IDL.Int,
   'pincode' : IDL.Nat32,
   'itemIds' : IDL.Vec(IDL.Nat32),
-  'status' : OrderStatus,
 });
 export const Product = IDL.Record({
   'id' : IDL.Nat32,
@@ -42,9 +42,20 @@ export const Product = IDL.Record({
   'origin' : IDL.Text,
   'category' : IDL.Text,
 });
+export const UserProfile = IDL.Record({
+  'name' : IDL.Text,
+  'email' : IDL.Text,
+  'phone' : IDL.Text,
+});
 export const RoundInfo = IDL.Record({
   'closingDate' : IDL.Text,
   'roundNumber' : IDL.Nat32,
+});
+export const PaynowConfig = IDL.Record({
+  'returnUrl' : IDL.Text,
+  'integrationId' : IDL.Text,
+  'resultUrl' : IDL.Text,
+  'integrationKey' : IDL.Text,
 });
 export const NewOrderData = IDL.Record({
   'destination' : IDL.Text,
@@ -57,35 +68,136 @@ export const RoundInfoArgs = IDL.Record({
   'closingDate' : IDL.Text,
   'roundNumber' : IDL.Nat32,
 });
-export const PaynowConfig = IDL.Record({
-  'integrationId' : IDL.Text,
-  'integrationKey' : IDL.Text,
-  'returnUrl' : IDL.Text,
-  'resultUrl' : IDL.Text,
-});
 
 export const idlService = IDL.Service({
   '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
   'addProduct' : IDL.Func(
-      [IDL.Text, IDL.Nat32, IDL.Text, IDL.Text],
+      [IDL.Text, IDL.Text, IDL.Nat32, IDL.Text, IDL.Text],
       [IDL.Nat32],
       [],
     ),
   'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
-  'getAllOrders' : IDL.Func([], [IDL.Vec(OrderData)], []),
+  'changeAdminPassword' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
+  'checkAdminPassword' : IDL.Func([IDL.Text], [IDL.Bool], ['query']),
+  'confirmOrderReceived' : IDL.Func([IDL.Nat64], [], []),
+  'getAllOrders' : IDL.Func([IDL.Text], [IDL.Vec(OrderDataWithStatus)], []),
   'getAllProducts' : IDL.Func([], [IDL.Vec(Product)], ['query']),
   'getAllProductsByName' : IDL.Func([], [IDL.Vec(Product)], ['query']),
+  'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
   'getCurrentRoundInfo' : IDL.Func([], [RoundInfo], ['query']),
-  'getMyOrders' : IDL.Func([], [IDL.Vec(OrderData)], ['query']),
+  'getMyOrders' : IDL.Func([], [IDL.Vec(OrderDataWithStatus)], ['query']),
+  'getPaynowConfig' : IDL.Func([IDL.Text], [PaynowConfig], []),
+  'getUserProfile' : IDL.Func(
+      [IDL.Principal],
+      [IDL.Opt(UserProfile)],
+      ['query'],
+    ),
   'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
   'placeOrder' : IDL.Func([NewOrderData], [IDL.Nat64], []),
-  'removeProduct' : IDL.Func([IDL.Nat32], [], []),
-  'setCurrentRoundInfo' : IDL.Func([RoundInfoArgs], [], []),
-  'updateOrderStatus' : IDL.Func([IDL.Nat64, OrderStatus], [], []),
-  'confirmOrderReceived' : IDL.Func([IDL.Nat64], [], []),
-  'setPaynowConfig' : IDL.Func([PaynowConfig], [], []),
-  'getPaynowConfig' : IDL.Func([], [PaynowConfig], []),
+  'removeProduct' : IDL.Func([IDL.Text, IDL.Nat32], [], []),
+  'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+  'setCurrentRoundInfo' : IDL.Func([IDL.Text, RoundInfoArgs], [], []),
+  'setPaynowConfig' : IDL.Func([IDL.Text, PaynowConfig], [], []),
+  'updateOrderStatus' : IDL.Func([IDL.Text, IDL.Nat64, OrderStatus], [], []),
 });
 
-export const idlFactory = idlService;
+export const idlInitArgs = [];
+
+export const idlFactory = ({ IDL }) => {
+  const UserRole = IDL.Variant({
+    'admin' : IDL.Null,
+    'user' : IDL.Null,
+    'guest' : IDL.Null,
+  });
+  const OrderStatus = IDL.Variant({
+    'shipped' : IDL.Null,
+    'paymentConfirmed' : IDL.Null,
+    'pendingPayment' : IDL.Null,
+    'receivedByUser' : IDL.Null,
+    'delivered' : IDL.Null,
+  });
+  const PaymentMethod = IDL.Variant({
+    'cashOnDelivery' : IDL.Null,
+    'online' : IDL.Null,
+  });
+  const OrderDataWithStatus = IDL.Record({
+    'id' : IDL.Nat64,
+    'status' : OrderStatus,
+    'destination' : IDL.Text,
+    'paymentMethod' : PaymentMethod,
+    'user' : IDL.Principal,
+    'university' : IDL.Text,
+    'timestamp' : IDL.Int,
+    'pincode' : IDL.Nat32,
+    'itemIds' : IDL.Vec(IDL.Nat32),
+  });
+  const Product = IDL.Record({
+    'id' : IDL.Nat32,
+    'retailPrice' : IDL.Nat32,
+    'name' : IDL.Text,
+    'origin' : IDL.Text,
+    'category' : IDL.Text,
+  });
+  const UserProfile = IDL.Record({
+    'name' : IDL.Text,
+    'email' : IDL.Text,
+    'phone' : IDL.Text,
+  });
+  const RoundInfo = IDL.Record({
+    'closingDate' : IDL.Text,
+    'roundNumber' : IDL.Nat32,
+  });
+  const PaynowConfig = IDL.Record({
+    'returnUrl' : IDL.Text,
+    'integrationId' : IDL.Text,
+    'resultUrl' : IDL.Text,
+    'integrationKey' : IDL.Text,
+  });
+  const NewOrderData = IDL.Record({
+    'destination' : IDL.Text,
+    'paymentMethod' : PaymentMethod,
+    'university' : IDL.Text,
+    'pincode' : IDL.Nat32,
+    'itemIds' : IDL.Vec(IDL.Nat32),
+  });
+  const RoundInfoArgs = IDL.Record({
+    'closingDate' : IDL.Text,
+    'roundNumber' : IDL.Nat32,
+  });
+  
+  return IDL.Service({
+    '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
+    'addProduct' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Nat32, IDL.Text, IDL.Text],
+        [IDL.Nat32],
+        [],
+      ),
+    'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+    'changeAdminPassword' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
+    'checkAdminPassword' : IDL.Func([IDL.Text], [IDL.Bool], ['query']),
+    'confirmOrderReceived' : IDL.Func([IDL.Nat64], [], []),
+    'getAllOrders' : IDL.Func([IDL.Text], [IDL.Vec(OrderDataWithStatus)], []),
+    'getAllProducts' : IDL.Func([], [IDL.Vec(Product)], ['query']),
+    'getAllProductsByName' : IDL.Func([], [IDL.Vec(Product)], ['query']),
+    'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
+    'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
+    'getCurrentRoundInfo' : IDL.Func([], [RoundInfo], ['query']),
+    'getMyOrders' : IDL.Func([], [IDL.Vec(OrderDataWithStatus)], ['query']),
+    'getPaynowConfig' : IDL.Func([IDL.Text], [PaynowConfig], []),
+    'getUserProfile' : IDL.Func(
+        [IDL.Principal],
+        [IDL.Opt(UserProfile)],
+        ['query'],
+      ),
+    'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
+    'placeOrder' : IDL.Func([NewOrderData], [IDL.Nat64], []),
+    'removeProduct' : IDL.Func([IDL.Text, IDL.Nat32], [], []),
+    'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'setCurrentRoundInfo' : IDL.Func([IDL.Text, RoundInfoArgs], [], []),
+    'setPaynowConfig' : IDL.Func([IDL.Text, PaynowConfig], [], []),
+    'updateOrderStatus' : IDL.Func([IDL.Text, IDL.Nat64, OrderStatus], [], []),
+  });
+};
+
+export const init = ({ IDL }) => { return []; };

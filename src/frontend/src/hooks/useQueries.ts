@@ -1,15 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { NewOrderData, RoundInfoArgs } from "../backend.d";
+import {
+  type NewOrderData,
+  OrderStatus,
+  type PaynowConfig,
+  type RoundInfoArgs,
+} from "../backend.d";
 import { useActor } from "./useActor";
 
-export type OrderStatus =
-  | { pendingPayment: null }
-  | { paymentConfirmed: null }
-  | { shipped: null }
-  | { delivered: null }
-  | { receivedByUser: null };
-
-export function useProducts() {
+export function useGetAllProducts() {
   const { actor, isFetching } = useActor();
   return useQuery({
     queryKey: ["products"],
@@ -21,7 +19,7 @@ export function useProducts() {
   });
 }
 
-export function useRoundInfo() {
+export function useGetCurrentRoundInfo() {
   const { actor, isFetching } = useActor();
   return useQuery({
     queryKey: ["roundInfo"],
@@ -33,64 +31,7 @@ export function useRoundInfo() {
   });
 }
 
-export function useIsAdmin() {
-  const { actor, isFetching } = useActor();
-  return useQuery({
-    queryKey: ["isAdmin"],
-    queryFn: async () => {
-      if (!actor) return false;
-      return actor.isCallerAdmin();
-    },
-    enabled: !!actor && !isFetching,
-  });
-}
-
-export function useUserRole() {
-  const { actor, isFetching } = useActor();
-  return useQuery({
-    queryKey: ["userRole"],
-    queryFn: async () => {
-      if (!actor) return null;
-      try {
-        return await actor.getCallerUserRole();
-      } catch {
-        // User not yet registered — trap from backend
-        return null;
-      }
-    },
-    enabled: !!actor && !isFetching,
-    retry: false,
-  });
-}
-
-export function useInitializeUser() {
-  const { actor } = useActor();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (passcode: string) => {
-      if (!actor) throw new Error("Not connected");
-      return actor._initializeAccessControlWithSecret(passcode);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["userRole"] });
-      qc.invalidateQueries({ queryKey: ["isAdmin"] });
-    },
-  });
-}
-
-export function useAllOrders() {
-  const { actor, isFetching } = useActor();
-  return useQuery({
-    queryKey: ["allOrders"],
-    queryFn: async () => {
-      if (!actor) return [];
-      return actor.getAllOrders();
-    },
-    enabled: !!actor && !isFetching,
-  });
-}
-
-export function useMyOrders(enabled: boolean) {
+export function useGetMyOrders(enabled: boolean) {
   const { actor, isFetching } = useActor();
   return useQuery({
     queryKey: ["myOrders"],
@@ -98,7 +39,31 @@ export function useMyOrders(enabled: boolean) {
       if (!actor) return [];
       return actor.getMyOrders();
     },
-    enabled: !!actor && !isFetching && enabled,
+    enabled: enabled && !!actor && !isFetching,
+  });
+}
+
+export function useGetAllOrders(adminKey: string) {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["allOrders", adminKey],
+    queryFn: async () => {
+      if (!actor || !adminKey) return [];
+      return actor.getAllOrders(adminKey);
+    },
+    enabled: !!actor && !isFetching && !!adminKey,
+  });
+}
+
+export function useGetPaynowConfig(adminKey: string) {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["paynowConfig", adminKey],
+    queryFn: async () => {
+      if (!actor || !adminKey) return null;
+      return actor.getPaynowConfig(adminKey);
+    },
+    enabled: !!actor && !isFetching && !!adminKey,
   });
 }
 
@@ -111,42 +76,30 @@ export function usePlaceOrder() {
       return actor.placeOrder(orderData);
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["allOrders"] });
       qc.invalidateQueries({ queryKey: ["myOrders"] });
     },
   });
 }
 
-export function useConfirmOrderReceived() {
+export function useCheckAdminPassword() {
   const { actor } = useActor();
-  const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (orderId: bigint) => {
+    mutationFn: async (password: string) => {
       if (!actor) throw new Error("Not connected");
-      return (actor as any).confirmOrderReceived(orderId);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["myOrders"] });
+      return actor.checkAdminPassword(password);
     },
   });
 }
 
-export function useUpdateOrderStatus() {
+export function useChangeAdminPassword() {
   const { actor } = useActor();
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
-      orderId,
-      status,
-    }: {
-      orderId: bigint;
-      status: OrderStatus;
-    }) => {
+      oldPassword,
+      newPassword,
+    }: { oldPassword: string; newPassword: string }) => {
       if (!actor) throw new Error("Not connected");
-      return (actor as any).updateOrderStatus(orderId, status);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["allOrders"] });
+      return actor.changeAdminPassword(oldPassword, newPassword);
     },
   });
 }
@@ -156,18 +109,20 @@ export function useAddProduct() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
+      adminKey,
       name,
       retailPrice,
       origin,
       category,
     }: {
+      adminKey: string;
       name: string;
       retailPrice: number;
       origin: string;
       category: string;
     }) => {
       if (!actor) throw new Error("Not connected");
-      return actor.addProduct(name, retailPrice, origin, category);
+      return actor.addProduct(adminKey, name, retailPrice, origin, category);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["products"] });
@@ -179,9 +134,12 @@ export function useRemoveProduct() {
   const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (productId: number) => {
+    mutationFn: async ({
+      adminKey,
+      productId,
+    }: { adminKey: string; productId: number }) => {
       if (!actor) throw new Error("Not connected");
-      return actor.removeProduct(productId);
+      return actor.removeProduct(adminKey, productId);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["products"] });
@@ -189,29 +147,39 @@ export function useRemoveProduct() {
   });
 }
 
-export function useSetRoundInfo() {
+export function useUpdateOrderStatus() {
   const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (roundInfo: RoundInfoArgs) => {
+    mutationFn: async ({
+      adminKey,
+      orderId,
+      status,
+    }: {
+      adminKey: string;
+      orderId: bigint;
+      status: OrderStatus;
+    }) => {
       if (!actor) throw new Error("Not connected");
-      return actor.setCurrentRoundInfo(roundInfo);
+      return actor.updateOrderStatus(adminKey, orderId, status);
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["roundInfo"] });
+      qc.invalidateQueries({ queryKey: ["allOrders"] });
     },
   });
 }
 
-export function useGetPaynowConfig(enabled: boolean) {
-  const { actor, isFetching } = useActor();
-  return useQuery({
-    queryKey: ["paynowConfig"],
-    queryFn: async () => {
-      if (!actor) return null;
-      return (actor as any).getPaynowConfig();
+export function useConfirmOrderReceived() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (orderId: bigint) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.confirmOrderReceived(orderId);
     },
-    enabled: !!actor && !isFetching && enabled,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["myOrders"] });
+    },
   });
 }
 
@@ -219,17 +187,34 @@ export function useSetPaynowConfig() {
   const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (config: {
-      integrationId: string;
-      integrationKey: string;
-      returnUrl: string;
-      resultUrl: string;
-    }) => {
+    mutationFn: async ({
+      adminKey,
+      config,
+    }: { adminKey: string; config: PaynowConfig }) => {
       if (!actor) throw new Error("Not connected");
-      return (actor as any).setPaynowConfig(config);
+      return actor.setPaynowConfig(adminKey, config);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["paynowConfig"] });
     },
   });
 }
+
+export function useSetCurrentRoundInfo() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      adminKey,
+      roundInfo,
+    }: { adminKey: string; roundInfo: RoundInfoArgs }) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.setCurrentRoundInfo(adminKey, roundInfo);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["roundInfo"] });
+    },
+  });
+}
+
+export { OrderStatus };

@@ -93,6 +93,12 @@ export interface RoundInfoArgs {
     closingDate: string;
     roundNumber: number;
 }
+export interface PaynowConfig {
+    returnUrl: string;
+    integrationId: string;
+    resultUrl: string;
+    integrationKey: string;
+}
 export interface NewOrderData {
     destination: string;
     paymentMethod: PaymentMethod;
@@ -100,9 +106,25 @@ export interface NewOrderData {
     pincode: number;
     itemIds: Uint32Array;
 }
+export interface OrderDataWithStatus {
+    id: bigint;
+    status: OrderStatus;
+    destination: string;
+    paymentMethod: PaymentMethod;
+    user: Principal;
+    university: string;
+    timestamp: bigint;
+    pincode: number;
+    itemIds: Uint32Array;
+}
 export interface RoundInfo {
     closingDate: string;
     roundNumber: number;
+}
+export interface UserProfile {
+    name: string;
+    email: string;
+    phone: string;
 }
 export interface Product {
     id: number;
@@ -111,15 +133,12 @@ export interface Product {
     origin: string;
     category: string;
 }
-export interface OrderData {
-    id: bigint;
-    destination: string;
-    paymentMethod: PaymentMethod;
-    user: Principal;
-    university: string;
-    timestamp: bigint;
-    pincode: number;
-    itemIds: Uint32Array;
+export enum OrderStatus {
+    shipped = "shipped",
+    paymentConfirmed = "paymentConfirmed",
+    pendingPayment = "pendingPayment",
+    receivedByUser = "receivedByUser",
+    delivered = "delivered"
 }
 export enum PaymentMethod {
     cashOnDelivery = "cashOnDelivery",
@@ -132,21 +151,29 @@ export enum UserRole {
 }
 export interface backendInterface {
     _initializeAccessControlWithSecret(userSecret: string): Promise<void>;
-    addProduct(name: string, retailPrice: number, origin: string, category: string): Promise<number>;
+    addProduct(adminKey: string, name: string, retailPrice: number, origin: string, category: string): Promise<number>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
-    getAllOrders(): Promise<Array<OrderData>>;
-    getAllOrdersByTimestamp(): Promise<Array<OrderData>>;
+    changeAdminPassword(oldPassword: string, newPassword: string): Promise<boolean>;
+    checkAdminPassword(password: string): Promise<boolean>;
+    confirmOrderReceived(orderId: bigint): Promise<void>;
+    getAllOrders(adminKey: string): Promise<Array<OrderDataWithStatus>>;
     getAllProducts(): Promise<Array<Product>>;
     getAllProductsByName(): Promise<Array<Product>>;
+    getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
     getCurrentRoundInfo(): Promise<RoundInfo>;
-    getMyOrders(): Promise<Array<OrderData>>;
+    getMyOrders(): Promise<Array<OrderDataWithStatus>>;
+    getPaynowConfig(adminKey: string): Promise<PaynowConfig>;
+    getUserProfile(user: Principal): Promise<UserProfile | null>;
     isCallerAdmin(): Promise<boolean>;
     placeOrder(orderData: NewOrderData): Promise<bigint>;
-    removeProduct(productId: number): Promise<void>;
-    setCurrentRoundInfo(roundInfo: RoundInfoArgs): Promise<void>;
+    removeProduct(adminKey: string, productId: number): Promise<void>;
+    saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    setCurrentRoundInfo(adminKey: string, roundInfo: RoundInfoArgs): Promise<void>;
+    setPaynowConfig(adminKey: string, config: PaynowConfig): Promise<void>;
+    updateOrderStatus(adminKey: string, orderId: bigint, status: OrderStatus): Promise<void>;
 }
-import type { NewOrderData as _NewOrderData, OrderData as _OrderData, PaymentMethod as _PaymentMethod, UserRole as _UserRole } from "./declarations/backend.did.d.ts";
+import type { NewOrderData as _NewOrderData, OrderDataWithStatus as _OrderDataWithStatus, OrderStatus as _OrderStatus, PaymentMethod as _PaymentMethod, UserProfile as _UserProfile, UserRole as _UserRole } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
     async _initializeAccessControlWithSecret(arg0: string): Promise<void> {
@@ -163,17 +190,17 @@ export class Backend implements backendInterface {
             return result;
         }
     }
-    async addProduct(arg0: string, arg1: number, arg2: string, arg3: string): Promise<number> {
+    async addProduct(arg0: string, arg1: string, arg2: number, arg3: string, arg4: string): Promise<number> {
         if (this.processError) {
             try {
-                const result = await this.actor.addProduct(arg0, arg1, arg2, arg3);
+                const result = await this.actor.addProduct(arg0, arg1, arg2, arg3, arg4);
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.addProduct(arg0, arg1, arg2, arg3);
+            const result = await this.actor.addProduct(arg0, arg1, arg2, arg3, arg4);
             return result;
         }
     }
@@ -191,31 +218,59 @@ export class Backend implements backendInterface {
             return result;
         }
     }
-    async getAllOrders(): Promise<Array<OrderData>> {
+    async changeAdminPassword(arg0: string, arg1: string): Promise<boolean> {
         if (this.processError) {
             try {
-                const result = await this.actor.getAllOrders();
-                return from_candid_vec_n3(this._uploadFile, this._downloadFile, result);
+                const result = await this.actor.changeAdminPassword(arg0, arg1);
+                return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getAllOrders();
-            return from_candid_vec_n3(this._uploadFile, this._downloadFile, result);
+            const result = await this.actor.changeAdminPassword(arg0, arg1);
+            return result;
         }
     }
-    async getAllOrdersByTimestamp(): Promise<Array<OrderData>> {
+    async checkAdminPassword(arg0: string): Promise<boolean> {
         if (this.processError) {
             try {
-                const result = await this.actor.getAllOrdersByTimestamp();
+                const result = await this.actor.checkAdminPassword(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.checkAdminPassword(arg0);
+            return result;
+        }
+    }
+    async confirmOrderReceived(arg0: bigint): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.confirmOrderReceived(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.confirmOrderReceived(arg0);
+            return result;
+        }
+    }
+    async getAllOrders(arg0: string): Promise<Array<OrderDataWithStatus>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getAllOrders(arg0);
                 return from_candid_vec_n3(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getAllOrdersByTimestamp();
+            const result = await this.actor.getAllOrders(arg0);
             return from_candid_vec_n3(this._uploadFile, this._downloadFile, result);
         }
     }
@@ -247,18 +302,32 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async getCallerUserProfile(): Promise<UserProfile | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getCallerUserProfile();
+                return from_candid_opt_n10(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getCallerUserProfile();
+            return from_candid_opt_n10(this._uploadFile, this._downloadFile, result);
+        }
+    }
     async getCallerUserRole(): Promise<UserRole> {
         if (this.processError) {
             try {
                 const result = await this.actor.getCallerUserRole();
-                return from_candid_UserRole_n8(this._uploadFile, this._downloadFile, result);
+                return from_candid_UserRole_n11(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
             const result = await this.actor.getCallerUserRole();
-            return from_candid_UserRole_n8(this._uploadFile, this._downloadFile, result);
+            return from_candid_UserRole_n11(this._uploadFile, this._downloadFile, result);
         }
     }
     async getCurrentRoundInfo(): Promise<RoundInfo> {
@@ -275,7 +344,7 @@ export class Backend implements backendInterface {
             return result;
         }
     }
-    async getMyOrders(): Promise<Array<OrderData>> {
+    async getMyOrders(): Promise<Array<OrderDataWithStatus>> {
         if (this.processError) {
             try {
                 const result = await this.actor.getMyOrders();
@@ -287,6 +356,34 @@ export class Backend implements backendInterface {
         } else {
             const result = await this.actor.getMyOrders();
             return from_candid_vec_n3(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getPaynowConfig(arg0: string): Promise<PaynowConfig> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getPaynowConfig(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getPaynowConfig(arg0);
+            return result;
+        }
+    }
+    async getUserProfile(arg0: Principal): Promise<UserProfile | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getUserProfile(arg0);
+                return from_candid_opt_n10(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getUserProfile(arg0);
+            return from_candid_opt_n10(this._uploadFile, this._downloadFile, result);
         }
     }
     async isCallerAdmin(): Promise<boolean> {
@@ -306,57 +403,106 @@ export class Backend implements backendInterface {
     async placeOrder(arg0: NewOrderData): Promise<bigint> {
         if (this.processError) {
             try {
-                const result = await this.actor.placeOrder(to_candid_NewOrderData_n10(this._uploadFile, this._downloadFile, arg0));
+                const result = await this.actor.placeOrder(to_candid_NewOrderData_n13(this._uploadFile, this._downloadFile, arg0));
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.placeOrder(to_candid_NewOrderData_n10(this._uploadFile, this._downloadFile, arg0));
+            const result = await this.actor.placeOrder(to_candid_NewOrderData_n13(this._uploadFile, this._downloadFile, arg0));
             return result;
         }
     }
-    async removeProduct(arg0: number): Promise<void> {
+    async removeProduct(arg0: string, arg1: number): Promise<void> {
         if (this.processError) {
             try {
-                const result = await this.actor.removeProduct(arg0);
+                const result = await this.actor.removeProduct(arg0, arg1);
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.removeProduct(arg0);
+            const result = await this.actor.removeProduct(arg0, arg1);
             return result;
         }
     }
-    async setCurrentRoundInfo(arg0: RoundInfoArgs): Promise<void> {
+    async saveCallerUserProfile(arg0: UserProfile): Promise<void> {
         if (this.processError) {
             try {
-                const result = await this.actor.setCurrentRoundInfo(arg0);
+                const result = await this.actor.saveCallerUserProfile(arg0);
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.setCurrentRoundInfo(arg0);
+            const result = await this.actor.saveCallerUserProfile(arg0);
+            return result;
+        }
+    }
+    async setCurrentRoundInfo(arg0: string, arg1: RoundInfoArgs): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.setCurrentRoundInfo(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.setCurrentRoundInfo(arg0, arg1);
+            return result;
+        }
+    }
+    async setPaynowConfig(arg0: string, arg1: PaynowConfig): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.setPaynowConfig(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.setPaynowConfig(arg0, arg1);
+            return result;
+        }
+    }
+    async updateOrderStatus(arg0: string, arg1: bigint, arg2: OrderStatus): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.updateOrderStatus(arg0, arg1, to_candid_OrderStatus_n17(this._uploadFile, this._downloadFile, arg2));
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.updateOrderStatus(arg0, arg1, to_candid_OrderStatus_n17(this._uploadFile, this._downloadFile, arg2));
             return result;
         }
     }
 }
-function from_candid_OrderData_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _OrderData): OrderData {
+function from_candid_OrderDataWithStatus_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _OrderDataWithStatus): OrderDataWithStatus {
     return from_candid_record_n5(_uploadFile, _downloadFile, value);
 }
-function from_candid_PaymentMethod_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _PaymentMethod): PaymentMethod {
+function from_candid_OrderStatus_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _OrderStatus): OrderStatus {
     return from_candid_variant_n7(_uploadFile, _downloadFile, value);
 }
-function from_candid_UserRole_n8(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _UserRole): UserRole {
+function from_candid_PaymentMethod_n8(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _PaymentMethod): PaymentMethod {
     return from_candid_variant_n9(_uploadFile, _downloadFile, value);
+}
+function from_candid_UserRole_n11(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _UserRole): UserRole {
+    return from_candid_variant_n12(_uploadFile, _downloadFile, value);
+}
+function from_candid_opt_n10(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_UserProfile]): UserProfile | null {
+    return value.length === 0 ? null : value[0];
 }
 function from_candid_record_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
     id: bigint;
+    status: _OrderStatus;
     destination: string;
     paymentMethod: _PaymentMethod;
     user: Principal;
@@ -366,6 +512,7 @@ function from_candid_record_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint
     itemIds: Uint32Array;
 }): {
     id: bigint;
+    status: OrderStatus;
     destination: string;
     paymentMethod: PaymentMethod;
     user: Principal;
@@ -376,8 +523,9 @@ function from_candid_record_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint
 } {
     return {
         id: value.id,
+        status: from_candid_OrderStatus_n6(_uploadFile, _downloadFile, value.status),
         destination: value.destination,
-        paymentMethod: from_candid_PaymentMethod_n6(_uploadFile, _downloadFile, value.paymentMethod),
+        paymentMethod: from_candid_PaymentMethod_n8(_uploadFile, _downloadFile, value.paymentMethod),
         user: value.user,
         university: value.university,
         timestamp: value.timestamp,
@@ -385,14 +533,7 @@ function from_candid_record_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint
         itemIds: value.itemIds
     };
 }
-function from_candid_variant_n7(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
-    cashOnDelivery: null;
-} | {
-    online: null;
-}): PaymentMethod {
-    return "cashOnDelivery" in value ? PaymentMethod.cashOnDelivery : "online" in value ? PaymentMethod.online : value;
-}
-function from_candid_variant_n9(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+function from_candid_variant_n12(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
     admin: null;
 } | {
     user: null;
@@ -401,19 +542,42 @@ function from_candid_variant_n9(_uploadFile: (file: ExternalBlob) => Promise<Uin
 }): UserRole {
     return "admin" in value ? UserRole.admin : "user" in value ? UserRole.user : "guest" in value ? UserRole.guest : value;
 }
-function from_candid_vec_n3(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Array<_OrderData>): Array<OrderData> {
-    return value.map((x)=>from_candid_OrderData_n4(_uploadFile, _downloadFile, x));
+function from_candid_variant_n7(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    shipped: null;
+} | {
+    paymentConfirmed: null;
+} | {
+    pendingPayment: null;
+} | {
+    receivedByUser: null;
+} | {
+    delivered: null;
+}): OrderStatus {
+    return "shipped" in value ? OrderStatus.shipped : "paymentConfirmed" in value ? OrderStatus.paymentConfirmed : "pendingPayment" in value ? OrderStatus.pendingPayment : "receivedByUser" in value ? OrderStatus.receivedByUser : "delivered" in value ? OrderStatus.delivered : value;
 }
-function to_candid_NewOrderData_n10(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: NewOrderData): _NewOrderData {
-    return to_candid_record_n11(_uploadFile, _downloadFile, value);
+function from_candid_variant_n9(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    cashOnDelivery: null;
+} | {
+    online: null;
+}): PaymentMethod {
+    return "cashOnDelivery" in value ? PaymentMethod.cashOnDelivery : "online" in value ? PaymentMethod.online : value;
 }
-function to_candid_PaymentMethod_n12(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: PaymentMethod): _PaymentMethod {
-    return to_candid_variant_n13(_uploadFile, _downloadFile, value);
+function from_candid_vec_n3(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Array<_OrderDataWithStatus>): Array<OrderDataWithStatus> {
+    return value.map((x)=>from_candid_OrderDataWithStatus_n4(_uploadFile, _downloadFile, x));
+}
+function to_candid_NewOrderData_n13(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: NewOrderData): _NewOrderData {
+    return to_candid_record_n14(_uploadFile, _downloadFile, value);
+}
+function to_candid_OrderStatus_n17(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: OrderStatus): _OrderStatus {
+    return to_candid_variant_n18(_uploadFile, _downloadFile, value);
+}
+function to_candid_PaymentMethod_n15(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: PaymentMethod): _PaymentMethod {
+    return to_candid_variant_n16(_uploadFile, _downloadFile, value);
 }
 function to_candid_UserRole_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: UserRole): _UserRole {
     return to_candid_variant_n2(_uploadFile, _downloadFile, value);
 }
-function to_candid_record_n11(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+function to_candid_record_n14(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
     destination: string;
     paymentMethod: PaymentMethod;
     university: string;
@@ -428,13 +592,13 @@ function to_candid_record_n11(_uploadFile: (file: ExternalBlob) => Promise<Uint8
 } {
     return {
         destination: value.destination,
-        paymentMethod: to_candid_PaymentMethod_n12(_uploadFile, _downloadFile, value.paymentMethod),
+        paymentMethod: to_candid_PaymentMethod_n15(_uploadFile, _downloadFile, value.paymentMethod),
         university: value.university,
         pincode: value.pincode,
         itemIds: value.itemIds
     };
 }
-function to_candid_variant_n13(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: PaymentMethod): {
+function to_candid_variant_n16(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: PaymentMethod): {
     cashOnDelivery: null;
 } | {
     online: null;
@@ -443,6 +607,29 @@ function to_candid_variant_n13(_uploadFile: (file: ExternalBlob) => Promise<Uint
         cashOnDelivery: null
     } : value == PaymentMethod.online ? {
         online: null
+    } : value;
+}
+function to_candid_variant_n18(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: OrderStatus): {
+    shipped: null;
+} | {
+    paymentConfirmed: null;
+} | {
+    pendingPayment: null;
+} | {
+    receivedByUser: null;
+} | {
+    delivered: null;
+} {
+    return value == OrderStatus.shipped ? {
+        shipped: null
+    } : value == OrderStatus.paymentConfirmed ? {
+        paymentConfirmed: null
+    } : value == OrderStatus.pendingPayment ? {
+        pendingPayment: null
+    } : value == OrderStatus.receivedByUser ? {
+        receivedByUser: null
+    } : value == OrderStatus.delivered ? {
+        delivered: null
     } : value;
 }
 function to_candid_variant_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: UserRole): {
